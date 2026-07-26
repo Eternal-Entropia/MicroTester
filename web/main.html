@@ -1,0 +1,817 @@
+<!-- web/main.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroTester - Dashboard</title>
+    <link rel="stylesheet" href="css/common.css">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        .comp-status {
+            font-size: 13px;
+            padding: 4px 12px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .comp-status.idle {
+            color: var(--text-muted);
+        }
+
+        .comp-status.testing {
+            color: #f59e0b;
+            animation: pulse-testing 1.5s infinite;
+        }
+
+        .comp-status.success {
+            color: #22c55e;
+        }
+
+        .comp-status.warning {
+            color: #f59e0b;
+        }
+
+        .comp-status.error {
+            color: #ef4444;
+        }
+
+        @keyframes pulse-testing {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .comp-schematic {
+            width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-container">
+
+        <!-- ===================== Sidebar ===================== -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">MicroTester</div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-panel="voltmeter">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        </svg>
+                    </span>
+                    <span>Voltmeter</span>
+                </button>
+                <button class="nav-item" data-panel="oscilloscope">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="18" rx="2" />
+                            <path d="M4 12h4l2-6 4 12 2-6h4" />
+                        </svg>
+                    </span>
+                    <span>Oscilloscope</span>
+                </button>
+                <button class="nav-item" data-panel="component">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M4 12h5M9 7v10M9 10l6-4.5M9 14l6 4.5" />
+                        </svg>
+                    </span>
+                    <span>Component Tester</span>
+                </button>
+
+                <button class="nav-item" data-panel="logic">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                            <path d="M9 1v5M15 1v5M9 18v5M15 18v5M1 9h5M1 15h5M18 9h5M18 15h5" />
+                        </svg>
+                    </span>
+                    <span>Logic Analyzer</span>
+                </button>
+                <button class="nav-item" data-panel="freqresp">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 3v18h18" />
+                            <path d="M7 16c2-4 4-8 7-8s3 4 5 1" />
+                        </svg>
+                    </span>
+                    <span>Frequency Response</span>
+                </button>
+
+                <div class="nav-divider"></div>
+
+                <button class="nav-item" data-panel="siggen">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 16h3V8h3v8h4V8h8v8h2" />
+                        </svg>
+                    </span>
+                    <span>Signal Gen</span>
+                    <div class="bg-indicator" id="sigGenIndicator"></div>
+                </button>
+                <button class="nav-item" data-panel="calibration">
+                    <span>Calibration</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="text-xs text-muted" style="text-align: center;">
+                    MicroTester Beta v1
+                </div>
+            </div>
+        </aside>
+
+        <!-- ===================== Main Content ===================== -->
+        <div class="main-content">
+
+            <!-- Top Bar -->
+            <div class="top-bar">
+                <div class="top-bar-title" id="topBarTitle">Voltmeter</div>
+                <div class="top-bar-actions">
+                    <div class="connection-status">
+                        <span class="status-dot disconnected" id="connDot"></span>
+                        <span class="text-xs" id="connText">Disconnected</span>
+                    </div>
+                    <button class="btn btn-outline btn-sm" id="btnConnect">
+                        Connect USB
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="content-area">
+
+                <!-- ======================== VOLTMETER ======================== -->
+                <div class="tab-panel active" id="panel-voltmeter">
+
+                    <!-- Toolbar Row -->
+                    <div class="volt-toolbar card"
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                            <button class="btn btn-success btn-sm" id="btnStartStop" disabled>
+                                ▶ Start
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnZeroCalib"
+                                title="Short probes together and click to zero offset">
+                                🎯 Zero Calib (Short Probes)
+                            </button>
+                            <span id="zeroOffsetBadge" class="status-badge"
+                                style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                Zero Offset: <span id="zeroOffsetVal">0.000 V</span>
+                                <span id="btnResetZero"
+                                    style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;"
+                                    title="Reset Zero Calibration">×</span>
+                            </span>
+                        </div>
+                        <button class="btn btn-outline btn-sm" id="btnSettings">
+                            ⚙ Settings
+                        </button>
+                    </div>
+
+                    <!-- Top row: DC/AC Toggle + Display -->
+                    <div class="volt-main-row card">
+                        <!-- DC/AC Toggle -->
+                        <div class="mode-toggle-container">
+                            <span class="mode-label">Mode</span>
+                            <div class="mode-toggle" data-mode="dc" id="modeToggle">
+                                <div class="mode-toggle-slider"></div>
+                                <div class="mode-toggle-option active" data-value="dc">DC</div>
+                                <div class="mode-toggle-option" data-value="ac">AC</div>
+                            </div>
+                        </div>
+
+                        <!-- Large Voltage Display -->
+                        <div class="volt-display">
+                            <span class="volt-value" id="voltValue">-.---</span>
+                            <span class="volt-unit" id="voltUnit">V</span>
+                        </div>
+                    </div>
+
+                    <!-- Info Row -->
+                    <div class="volt-info-row">
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Raw ADC</div>
+                            <div class="volt-info-value text-mono" id="voltRawAdc">-</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">ADC Voltage</div>
+                            <div class="volt-info-value text-mono" id="voltAdcMv">- mV</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Oversampling</div>
+                            <div class="volt-info-value text-mono" id="voltOversampling">+6 bits</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Effective Bits</div>
+                            <div class="volt-info-value text-mono" id="voltEffBits">18</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Divider Ratio</div>
+                            <div class="volt-info-value text-mono" id="voltDivRatioInfo">21.0x</div>
+                        </div>
+                    </div>
+
+                    <!-- AC Signal Parameters Grid -->
+                    <div class="card" id="voltAcMetricsCard" style="margin-top: 12px; padding: 14px 18px; display: none;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-cyan, #38bdf8); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                            <span>⚡ AC Signal Measurements</span>
+                        </div>
+                        <div class="volt-info-row" style="margin-top: 0;">
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">V RMS (AC)</div>
+                                <div class="volt-info-value text-mono" id="voltAcRms">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">Vpp (Peak-Peak)</div>
+                                <div class="volt-info-value text-mono" id="voltVpp">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">V Max (Peak+)</div>
+                                <div class="volt-info-value text-mono" id="voltVmax">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">V Min (Peak-)</div>
+                                <div class="volt-info-value text-mono" id="voltVmin">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">V DC (Offset)</div>
+                                <div class="volt-info-value text-mono" id="voltVdc">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">True RMS</div>
+                                <div class="volt-info-value text-mono" id="voltTrueRms">-.--- V</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">Crest Factor</div>
+                                <div class="volt-info-value text-mono" id="voltCrestFactor">-.--</div>
+                            </div>
+                            <div class="volt-info-item">
+                                <div class="volt-info-label">Frequency</div>
+                                <div class="volt-info-value text-mono" id="voltAcFreq">-- Hz</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Flags -->
+                    <div class="status-bar">
+                        <div class="status-flag">
+                            <span class="status-dot" id="voltOverflowDot"></span>
+                            <span>OVF</span>
+                        </div>
+                        <div class="status-flag">
+                            <span class="status-dot" id="voltUnderflowDot"></span>
+                            <span>UNF</span>
+                        </div>
+                        <div class="status-flag" style="margin-left: auto;">
+                            <span class="text-muted" id="voltSampleRate">-- sps</span>
+                        </div>
+                    </div>
+
+                    <!-- Settings Panel (hidden by default) -->
+                    <div class="config-panel collapsed" id="voltConfig">
+                        <div class="config-title">⚙ Voltmeter Settings</div>
+
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Channel</label>
+                                <select id="cfgVoltChannel">
+                                    <option value="0">CH0 (PA0 - Voltmeter)</option>
+                                    <option value="1">CH1 (PA1)</option>
+                                    <option value="2">CH2 (PA2)</option>
+                                    <option value="3">CH3 (PA3)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Oversampling</label>
+                                <select id="cfgVoltOversampling">
+                                    <option value="1">+1 bit (4 samples)</option>
+                                    <option value="2">+2 bits (16 samples)</option>
+                                    <option value="3">+3 bits (64 samples)</option>
+                                    <option value="4">+4 bits (256 samples)</option>
+                                    <option value="5">+5 bits (1024 samples)</option>
+                                    <option value="6" selected>+6 bits (4096 samples)</option>
+                                    <option value="7">+7 bits (16384 samples)</option>
+                                    <option value="8">+8 bits (65536 samples)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Sample Rate (Hz)</label>
+                                <input type="number" id="cfgVoltSampleRate" value="8" min="1" max="1000">
+                            </div>
+                            <div class="config-field">
+                                <label>Voltage Range</label>
+                                <select id="cfgVoltRange">
+                                    <option value="±30" data-divider="21.0" data-baseoffset="33.0" data-bias="false" selected>±30V (10k / 10k / 100k Bias Divider — встроенное смещение 33V)</option>
+                                    <option value="3.3" data-divider="1.0" data-baseoffset="0.0" data-bias="false">3.3V (Direct — 0..3.3V без смещения)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mt-16 flex gap-8 items-center">
+                            <span class="text-xs text-muted">
+                                Range: <strong id="voltMaxInput">±30V</strong>
+                                &nbsp;·&nbsp;
+                                Divider: <strong id="voltDivRatio">21.0x</strong>
+                            </span>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ======================== OSCILLOSCOPE ======================== -->
+                <div class="tab-panel" id="panel-oscilloscope">
+
+                    <!-- Toolbar Row -->
+                    <div class="osc-toolbar card"
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                            <button class="btn btn-success btn-sm" id="btnOscStartStop" disabled>
+                                ▶ Start
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnOscAutoScale">
+                                Auto Set
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnOscZeroCalib"
+                                title="Short input pin to GND and click to zero offset">
+                                🎯 Zero Calib (Short to GND)
+                            </button>
+                            <span id="oscZeroOffsetBadge" class="status-badge"
+                                style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                Zero Offset: <span id="oscZeroOffsetVal">0.000 V</span>
+                                <span id="btnOscResetZero"
+                                    style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;"
+                                    title="Reset Zero Calibration">×</span>
+                            </span>
+                        </div>
+
+                        <div style="display: flex; gap: 24px; align-items: center;">
+                            <!-- Time/Div Control -->
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                                <span class="text-xs text-muted" style="text-transform: uppercase;">Time / Div</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <button class="btn btn-outline" id="btnTimeDivDown"
+                                        style="padding: 4px 8px;">-</button>
+                                    <span class="text-mono" id="lblTimeDiv"
+                                        style="min-width: 60px; text-align: center; font-weight: 600;">2.0 ms</span>
+                                    <button class="btn btn-outline" id="btnTimeDivUp"
+                                        style="padding: 4px 8px;">+</button>
+                                </div>
+                            </div>
+
+                            <!-- V/Div Control -->
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                                <span class="text-xs text-muted" style="text-transform: uppercase;">Volts / Div</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <button class="btn btn-outline" id="btnVDivDown"
+                                        style="padding: 4px 8px;">-</button>
+                                    <span class="text-mono" id="lblVDiv"
+                                        style="min-width: 60px; text-align: center; font-weight: 600;">0.5 V</span>
+                                    <button class="btn btn-outline" id="btnVDivUp" style="padding: 4px 8px;">+</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-outline btn-sm" id="btnOscSettings">
+                            ⚙ Settings
+                        </button>
+                    </div>
+
+                    <!-- Settings Panel (hidden by default) -->
+                    <div class="config-panel collapsed" id="oscConfigPanel">
+                        <div class="config-title">⚙ Oscilloscope Settings</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Channel</label>
+                                <select id="cfgOscChannel">
+                                    <option value="0">CH0 (PA0)</option>
+                                    <option value="1">CH1 (PA1)</option>
+                                    <option value="2">CH2 (PA2)</option>
+                                    <option value="3">CH3 (PA3)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Sample Rate (kHz)</label>
+                                <select id="cfgOscSampleRate">
+                                    <option value="1">1 kHz</option>
+                                    <option value="10">10 kHz</option>
+                                    <option value="50">50 kHz</option>
+                                    <option value="100">100 kHz</option>
+                                    <option value="250">250 kHz</option>
+                                    <option value="500">500 kHz</option>
+                                    <option value="1000" selected>1 MHz (Realtime)</option>
+                                    <option value="2000">2 MHz (Realtime)</option>
+                                    <option value="5000">5 MHz (ETS)</option>
+                                    <option value="10000">10 MHz (ETS)</option>
+                                    <option value="20000">20 MHz (ETS)</option>
+                                    <option value="50000">50 MHz (ETS)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Oversampling</label>
+                                <select id="cfgOscOversample">
+                                    <option value="0" selected>None (Faster / Peak-Detect)</option>
+                                    <option value="1">+1 bit (4x Averaging)</option>
+                                    <option value="2">+2 bits (16x Averaging)</option>
+                                    <option value="3">+3 bits (64x Max Filter)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>USB Frame Rate</label>
+                                <div id="cfgOscActualRate"
+                                    style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #38bdf8; padding-top: 8px;">
+                                    0 frames/s</div>
+                            </div>
+                            <div class="config-field">
+                                <label>Trigger Mode</label>
+                                <select id="cfgOscTrigMode">
+                                    <option value="auto" selected>Auto</option>
+                                    <option value="normal">Normal</option>
+                                    <option value="single">Single</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Trigger Edge</label>
+                                <select id="cfgOscTrigEdge">
+                                    <option value="rising" selected>↑ Rising</option>
+                                    <option value="falling">↓ Falling</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Trigger Level (V)</label>
+                                <input type="number" id="cfgOscTrigLevel" value="0" step="0.05"
+                                    style="width: 100px; font-family: 'JetBrains Mono', monospace;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Canvas Area -->
+                    <div class="osc-display-container card"
+                        style="flex: 1; padding: 0; overflow: hidden; position: relative; min-height: 400px;">
+                        <canvas id="oscCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                    </div>
+
+                    <!-- Measurement Info Row -->
+                    <div class="volt-info-row">
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Vmax</div>
+                            <div class="volt-info-value text-mono" id="oscVmax">-.-- V</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Vmin</div>
+                            <div class="volt-info-value text-mono" id="oscVmin">-.-- V</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Vpp (Peak-Peak)</div>
+                            <div class="volt-info-value text-mono" id="oscVpp">-.-- V</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Frequency</div>
+                            <div class="volt-info-value text-mono" id="oscFreq">-- Hz</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Period</div>
+                            <div class="volt-info-value text-mono" id="oscPeriod">--</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ======================== COMPONENT TESTER ======================== -->
+                <div class="tab-panel" id="panel-component">
+                    <!-- Toolbar -->
+                    <div class="card"
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-success btn-sm" id="btnCompTest" disabled>
+                                🔬 Test Component
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnCompStop">
+                                ⏹ Cancel
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnSmallCap" disabled
+                                title="Ultra-Small Capacitors (1-80pF)">
+                                ⚡ pF Mode
+                            </button>
+                        </div>
+                        <div id="compStatus" class="comp-status idle">
+                            Connect a component to probes TP1, TP2, TP3
+                        </div>
+                    </div>
+
+                    <!-- Probe Wiring Info -->
+                    <div class="card" style="padding: 16px 20px;">
+                        <div
+                            style="display: flex; gap: 24px; align-items: center; justify-content: center; flex-wrap: wrap;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #ef4444;">TP1</div>
+                                <div class="text-muted" style="font-size: 11px;">PA7</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #22c55e;">TP2</div>
+                                <div class="text-muted" style="font-size: 11px;">PA6</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #3b82f6;">TP3</div>
+                                <div class="text-muted" style="font-size: 11px;">PA5</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Display -->
+                    <div class="card" id="compResultArea"
+                        style="display: none; padding: 32px 24px; text-align: center;">
+                        <div id="compResultIcon" style="font-size: 64px; margin-bottom: 12px;"></div>
+                        <div id="compResultType"
+                            style="font-size: 22px; font-weight: bold; color: var(--text); margin-bottom: 8px;"></div>
+                        <div id="compResultValue"
+                            style="font-size: 36px; font-weight: 800; color: var(--accent); font-family: 'JetBrains Mono', monospace; margin-bottom: 8px;">
+                        </div>
+                        <div id="compResultSecondary"
+                            style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;"></div>
+                        <div id="compProbeMap"
+                            style="font-size: 13px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; background: rgba(255,255,255,0.03); padding: 8px 16px; border-radius: 8px; display: inline-block;">
+                        </div>
+                        <div id="compResultPinout"
+                            style="display: none; margin-top: 20px; max-width: 240px; margin-left: auto; margin-right: auto;">
+                        </div>
+                    </div>
+
+                    <!-- Supported Capabilities & Measurements Info Card -->
+                    <div class="card" style="margin-top: 16px; padding: 20px 24px;">
+                        <div class="config-title" style="display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 16px;">
+                            <span>📊 Measurement Capabilities</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px;">
+                            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px;">
+                                <div style="font-weight: 700; color: #38bdf8; font-size: 13px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                    <span>⚡ Resistors</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+                                    • Resistance (R): 0.1 Ω .. 1 MΩ<br>
+                                    • Auto-detect probe pins TP1, TP2, TP3
+                                </div>
+                            </div>
+                            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px;">
+                                <div style="font-weight: 700; color: #38bdf8; font-size: 13px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                    <span>🔋 Capacitors</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+                                    • Capacitance (C): 1 pF .. 10,000 µF<br>
+                                    • Equivalent Series Resistance (ESR)
+                                </div>
+                            </div>
+                            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px;">
+                                <div style="font-weight: 700; color: #38bdf8; font-size: 13px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                    <span>💡 Diodes & LEDs</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+                                    • Forward Voltage Drop (Vf)<br>
+                                    • Anode (+) and Cathode (-) Pinout
+                                </div>
+                            </div>
+                            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px;">
+                                <div style="font-weight: 700; color: #38bdf8; font-size: 13px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                    <span>🔲 BJT Transistors (NPN / PNP)</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+                                    • Current Gain (hFE / β)<br>
+                                    • Base-Emitter Voltage (Vbe), Pinout (B, C, E)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <!-- ======================== LOGIC ANALYZER ======================== -->
+                <div class="tab-panel" id="panel-logic">
+                    <div class="card" style="min-height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; gap: 16px;">
+                        <div style="font-size: 56px; line-height: 1;">⚡</div>
+                        <h2 style="font-size: 22px; font-weight: 700; color: var(--accent-cyan, #38bdf8); margin: 0;">
+                            Logic Analyzer
+                        </h2>
+                        <span class="status-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; letter-spacing: 0.05em;">
+                            🚀 Coming Soon
+                        </span>
+                        <p class="text-muted" style="max-width: 420px; font-size: 13px; line-height: 1.6; margin: 0;">
+                            Multi-channel digital signal capture and protocol decoders (UART, SPI, I2C) are currently under development.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- ======================== FREQ RESPONSE ======================== -->
+                <div class="tab-panel" id="panel-freqresp">
+                    <div class="card" style="min-height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; gap: 16px;">
+                        <div style="font-size: 56px; line-height: 1;">📈</div>
+                        <h2 style="font-size: 22px; font-weight: 700; color: var(--accent-cyan, #38bdf8); margin: 0;">
+                            Frequency Response
+                        </h2>
+                        <span class="status-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; letter-spacing: 0.05em;">
+                            🚀 Coming Soon
+                        </span>
+                        <p class="text-muted" style="max-width: 420px; font-size: 13px; line-height: 1.6; margin: 0;">
+                            Frequency Response sweep measurement (Bode Plot) and LC filter network analysis are currently under development.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- ======================== SIGNAL GENERATOR ======================== -->
+                <div class="tab-panel" id="panel-siggen">
+                    <!-- Toolbar Card -->
+                    <div class="card"
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-success btn-sm" id="btnSigStart" disabled>
+                                ▶ Start Generation
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="btnSigStop" disabled>
+                                ■ Stop
+                            </button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="status-badge stopped" id="lblSigStatus">STOPPED</span>
+                            <span class="text-xs text-muted">
+                                Runs in background on hardware timer
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Waveform Live Preview Canvas Card -->
+                    <div class="card" style="padding: 16px; position: relative;">
+                        <div class="config-title" style="margin-bottom: 8px;">Waveform Preview</div>
+                        <div
+                            style="width: 100%; border-radius: var(--radius-sm); overflow: hidden; background: #0f172a;">
+                            <canvas id="sigWaveCanvas" style="width: 100%; height: 160px; display: block;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Controls & Parameters Grid -->
+                    <div class="card">
+                        <div class="config-title">Signal Configuration</div>
+
+                        <div class="config-grid"
+                            style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;">
+                            <div class="config-field">
+                                <label>Waveform Type</label>
+                                <select id="cfgSigWaveform">
+                                    <option value="0">Square (Meander - 50% Duty)</option>
+                                    <option value="1" selected>PWM (Variable Duty Cycle)</option>
+                                    <option value="2">DC (Constant HIGH — 3.3V)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field">
+                                <label>Output Pin</label>
+                                <select id="cfgSigPin">
+                                    <option value="0" selected>PA8 (TIM1 PWM)</option>
+                                    <option value="1">PA9 (TIM1 PWM)</option>
+                                    <option value="2">PA10 (TIM1 PWM)</option>
+                                    <option value="3">PB0 (TIM3 PWM)</option>
+                                    <option value="4">PB1 (TIM3 PWM)</option>
+                                    <option value="5">PB6 (TIM4 PWM)</option>
+                                    <option value="6">PB7 (TIM4 PWM)</option>
+                                    <option value="7">PB8 (TIM4 PWM)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="grid-column: span 2;">
+                                <label>Frequency (Hz)</label>
+                                <div style="display: flex; gap: 12px; align-items: center;">
+                                    <input type="number" id="cfgSigFreq" value="1000" min="1" max="10000000"
+                                        style="width: 130px;">
+                                    <input type="range" id="cfgSigFreqRange" min="0" max="7" step="0.01" value="3"
+                                        style="flex: 1;">
+                                </div>
+                                <!-- Quick Frequency Presets -->
+                                <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                    <button class="btn btn-outline btn-sm sig-preset-btn" data-freq="100"
+                                        style="padding: 2px 8px; font-size: 11px;">100 Hz</button>
+                                    <button class="btn btn-outline btn-sm sig-preset-btn" data-freq="1000"
+                                        style="padding: 2px 8px; font-size: 11px;">1 kHz</button>
+                                    <button class="btn btn-outline btn-sm sig-preset-btn" data-freq="10000"
+                                        style="padding: 2px 8px; font-size: 11px;">10 kHz</button>
+                                    <button class="btn btn-outline btn-sm sig-preset-btn" data-freq="100000"
+                                        style="padding: 2px 8px; font-size: 11px;">100 kHz</button>
+                                    <button class="btn btn-outline btn-sm sig-preset-btn" data-freq="1000000"
+                                        style="padding: 2px 8px; font-size: 11px;">1 MHz</button>
+                                </div>
+                            </div>
+
+                            <div class="config-field" style="grid-column: span 2;">
+                                <label>Duty Cycle (%)</label>
+                                <div style="display: flex; gap: 12px; align-items: center;">
+                                    <input type="number" id="cfgSigDuty" value="50" min="0" max="100"
+                                        style="width: 90px;">
+                                    <input type="range" id="cfgSigDutyRange" min="0" max="100" value="50"
+                                        style="flex: 1;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameters Output Row -->
+                    <div class="volt-info-row">
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Period (T)</div>
+                            <div class="volt-info-value text-mono" id="lblSigPeriod">1.00 ms</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">High Time (T_HIGH)</div>
+                            <div class="volt-info-value text-mono" id="lblSigTHigh">500.00 µs</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label">Low Time (T_LOW)</div>
+                            <div class="volt-info-value text-mono" id="lblSigTLow">500.00 µs</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ======================== CALIBRATION ======================== -->
+                <div class="tab-panel" id="panel-calibration">
+                    <div class="card" style="max-width: 850px; margin: 0 auto;">
+                        <div class="config-title" style="display: flex; align-items: center; gap: 8px; font-size: 16px;">
+                            <span>🎯 Probe & Offset Calibration</span>
+                        </div>
+                        <p class="text-sm text-muted" style="margin-bottom: 24px;">
+                            Short your measurement probes to GND to calibrate zero voltage offsets for Voltmeter and Oscilloscope channels.
+                        </p>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <!-- Voltmeter Zero Calibration -->
+                            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
+                                <h4 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                    <span>⚡ Voltmeter Zero Offset</span>
+                                </h4>
+                                <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
+                                    Short voltmeter probes together (connect to GND), then click calibrate.
+                                </p>
+                                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                    <button class="btn btn-primary btn-sm" id="btnVoltCalibTab">
+                                        🎯 Calibrate Voltmeter Zero
+                                    </button>
+                                    <span id="voltZeroBadgeTab" class="status-badge" style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                        Offset: <span id="voltZeroValTab">0.000 V</span>
+                                        <span id="btnVoltResetTab" style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;" title="Reset Zero">×</span>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Oscilloscope Zero Calibration -->
+                            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
+                                <h4 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                    <span>📈 Oscilloscope Zero Offset</span>
+                                </h4>
+                                <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
+                                    Short oscilloscope input pin (PA0/CH0) to GND, then click calibrate.
+                                </p>
+                                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                    <button class="btn btn-primary btn-sm" id="btnOscCalibTab">
+                                        🎯 Calibrate Oscilloscope Zero
+                                    </button>
+                                    <span id="oscZeroBadgeTab" class="status-badge" style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                        Offset: <span id="oscZeroValTab">0.000 V</span>
+                                        <span id="btnOscResetTab" style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;" title="Reset Zero">×</span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script src="js/usb_protocol.js"></script>
+    <script src="js/voltmeter.js"></script>
+    <script src="js/oscilloscope.js"></script>
+    <script src="js/siggen.js"></script>
+    <script src="js/comp_tester.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,255 @@
+/* web/css/start.css */
+
+/* ============================
+   MicroTester - Start Page
+   ============================ */
+
+.start-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    position: relative;
+}
+
+/* Background Grid Effect */
+.start-container::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image:
+        linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.start-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    max-width: 600px;
+}
+
+/* Logo / Title */
+.logo-title {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #3b82f6, #38bdf8, #22d3ee);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.logo-subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+    margin-bottom: 48px;
+}
+
+/* Main Buttons */
+.start-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+}
+
+.start-btn {
+    width: 280px;
+    padding: 16px 32px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+    border: 2px solid;
+    text-align: center;
+}
+
+.start-btn-primary {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    border-color: #3b82f6;
+}
+.start-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(59, 130, 246, 0.4);
+}
+
+.start-btn-secondary {
+    background: transparent;
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+.start-btn-secondary:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-accent);
+    transform: translateY(-2px);
+}
+
+/* MCU Selection Grid */
+.mcu-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+    width: 100%;
+    max-width: 500px;
+}
+
+.mcu-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    cursor: pointer;
+    transition: var(--transition);
+    text-align: center;
+}
+.mcu-card:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-card-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-glow);
+}
+
+.mcu-card-name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.mcu-card-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Flash Modal */
+.flash-content {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    min-width: 600px;
+}
+
+.flash-image {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #0b1120;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    min-height: 320px;
+    position: relative;
+}
+.flash-image img {
+    max-width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    cursor: zoom-in;
+    transition: transform 0.2s ease;
+}
+.flash-image img:hover {
+    transform: scale(1.02);
+}
+.flash-image .placeholder {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.flash-actions {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.flash-option {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.flash-option:hover {
+    border-color: var(--accent-primary);
+}
+.flash-option-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.flash-option-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Flash progress */
+.flash-progress {
+    display: none;
+    margin-top: 16px;
+}
+.flash-progress.active {
+    display: block;
+}
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-input);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #22d3ee);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+/* Support Button */
+.support-btn {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 100;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition);
+}
+.support-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-accent);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .logo-title {
+        font-size: 36px;
+    }
+    .mcu-grid {
+        grid-template-columns: 1fr;
+    }
+    .flash-content {
+        flex-direction: column;
+        min-width: auto;
+    }
+}

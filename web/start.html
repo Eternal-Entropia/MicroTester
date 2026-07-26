@@ -1,0 +1,290 @@
+<!-- web/start.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroTester Beta</title>
+    <link rel="stylesheet" href="css/common.css">
+    <link rel="stylesheet" href="css/start.css">
+</head>
+<body>
+
+<div class="start-container">
+    <div class="start-content">
+        <!-- Logo & Title -->
+        <h1 class="logo-title">MicroTester <span style="font-size: 0.45em; color: var(--accent, #38bdf8); vertical-align: middle; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 8px; border-radius: 6px; font-weight: 700;">BETA</span></h1>
+        <p class="logo-subtitle">Universal MCU-based test instrument suite</p>
+
+        <!-- Main Action Buttons -->
+        <div class="start-buttons">
+            <button class="start-btn start-btn-primary" id="btnQuickStart">
+                ⚡ Quick Start
+            </button>
+            <button class="start-btn start-btn-secondary" id="btnAlreadyFlashed">
+                🔌 Already Flashed
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ===============================
+     Modal: MCU Selection
+     =============================== -->
+<div class="modal-overlay" id="modalMcuSelect">
+    <div class="modal" style="width: 560px;">
+        <div class="modal-header">
+            <h3>Select Your Microcontroller</h3>
+            <button class="modal-close" data-close="modalMcuSelect">&times;</button>
+        </div>
+        <p class="text-sm text-muted" style="margin-bottom: 12px;">
+            Choose your MCU to see wiring diagram and flash firmware.
+        </p>
+        <div class="mcu-grid">
+            <div class="mcu-card disabled" data-mcu="stm32f103" style="opacity: 0.6; cursor: not-allowed; position: relative;">
+                <div class="mcu-card-name" style="display: flex; align-items: center; justify-content: space-between;">
+                    <span>STM32F103</span>
+                    <span style="font-size: 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 6px; border-radius: 4px; font-weight: 700;">Coming Soon</span>
+                </div>
+                <div class="mcu-card-desc">Blue Pill • 72MHz • 12-bit ADC</div>
+            </div>
+            <div class="mcu-card" data-mcu="stm32f401">
+                <div class="mcu-card-name">STM32F401</div>
+                <div class="mcu-card-desc">Black Pill • 84MHz • 12-bit ADC</div>
+            </div>
+            <div class="mcu-card disabled" data-mcu="rp2040" style="opacity: 0.6; cursor: not-allowed; position: relative;">
+                <div class="mcu-card-name" style="display: flex; align-items: center; justify-content: space-between;">
+                    <span>RP2040</span>
+                    <span style="font-size: 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 6px; border-radius: 4px; font-weight: 700;">Coming Soon</span>
+                </div>
+                <div class="mcu-card-desc">Raspberry Pi Pico • 133MHz • 12-bit ADC</div>
+            </div>
+            <div class="mcu-card disabled" data-mcu="esp32s3" style="opacity: 0.6; cursor: not-allowed; position: relative;">
+                <div class="mcu-card-name" style="display: flex; align-items: center; justify-content: space-between;">
+                    <span>ESP32-S3</span>
+                    <span style="font-size: 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 6px; border-radius: 4px; font-weight: 700;">Coming Soon</span>
+                </div>
+                <div class="mcu-card-desc">Dual Core • 240MHz • 12-bit ADC</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===============================
+     Modal: Flash MCU
+     =============================== -->
+<div class="modal-overlay" id="modalFlash">
+    <div class="modal" style="width: 820px;">
+        <div class="modal-header">
+            <h3 id="flashModalTitle">Flash - STM32F401</h3>
+            <button class="modal-close" data-close="modalFlash">&times;</button>
+        </div>
+
+        <div class="flash-content">
+            <!-- Wiring Diagram -->
+            <div class="flash-image" id="flashSchematicContainer" style="background: #0b1120; cursor: pointer; border: 1px solid #1e293b; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center;" title="Click to enlarge schematic">
+                <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; max-height: 350px; pointer-events: none;">
+                    <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; max-height: 350px; pointer-events: none;" />
+                </object>
+                <span class="text-xs" style="margin-top: 8px; font-size: 11px; color: #38bdf8; font-weight: bold;">🔍 Click schematic to open full screen zoom</span>
+            </div>
+
+            <!-- Flash Options -->
+            <div class="flash-actions">
+                <div class="flash-option disabled" id="optFlashWebUSB" style="opacity: 0.4; cursor: not-allowed; pointer-events: none; filter: grayscale(100%); background: #1e293b; border-color: #334155;">
+                    <div class="flash-option-title" style="color: #94a3b8;">⚡ Flash via WebUSB</div>
+                    <div class="flash-option-desc" style="color: #64748b;">
+                        Flash firmware directly from browser (DFU mode required)
+                    </div>
+                </div>
+                <div class="flash-option disabled" id="optDownloadBin" style="opacity: 0.4; cursor: not-allowed; pointer-events: none; filter: grayscale(100%); background: #1e293b; border-color: #334155;">
+                    <div class="flash-option-title" style="color: #94a3b8;">📥 Download Binary</div>
+                    <div class="flash-option-desc" style="color: #64748b;">
+                        Download .bin file and flash manually with STM32CubeProgrammer or other tools
+                    </div>
+                </div>
+
+                <!-- Compile Requirement Notice -->
+                <div style="margin-top: 12px; padding: 12px; border-radius: 8px; background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; text-align: center;">
+                    <span style="font-size: 13px; color: #fbbf24; font-weight: 600; display: block; letter-spacing: 0.3px;">⚠️ please compile with arduino ide</span>
+                </div>
+
+                <!-- Progress -->
+                <div class="flash-progress" id="flashProgress">
+                    <div class="text-sm">
+                        <span id="flashStatusText">Connecting...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="flashProgressFill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===============================
+     Modal: Support
+     =============================== -->
+<div class="modal-overlay" id="modalSupport">
+    <div class="modal" style="width: 460px;">
+        <div class="modal-header">
+            <h3>Support MicroTester</h3>
+            <button class="modal-close" data-close="modalSupport">&times;</button>
+        </div>
+        <div style="padding: 8px 0;">
+            <p class="text-sm" style="margin-bottom: 16px; color: var(--text-secondary);">
+                MicroTester is an open-source project. If you find it useful, consider supporting development!
+            </p>
+            <!-- Add your own support links/content here -->
+            <div class="card" style="margin-bottom: 12px;">
+                <p class="text-sm text-muted">
+                    Ethereum: 0xBA1e128A78774Ad5141f28A40be07DD64b3Bd8A5<br>
+                    Bitcoin: bc1qej8acmj7n69m6nhu5trgfyaut2n0chpznepk2v
+                </p>
+            </div>
+            <p class="text-xs text-muted">
+                Thank You!
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- ===============================
+     Modal: Schematic Zoom Lightbox
+     =============================== -->
+<div class="modal-overlay" id="modalSchematicZoom">
+    <div class="modal" style="width: 95vw; max-width: 1200px; max-height: 90vh; background: #0f172a; border: 1px solid #1e293b; padding: 16px;">
+        <div class="modal-header" style="border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px;">
+            <h3 style="color: #38bdf8; font-size: 16px; margin: 0;">🔍 Full Resolution Schematic Diagram</h3>
+            <button class="modal-close" data-close="modalSchematicZoom" style="color: #94a3b8;">&times;</button>
+        </div>
+        <div style="width: 100%; height: 75vh; overflow: auto; text-align: center; background: #0b1120; display: flex; justify-content: center; align-items: center;">
+            <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; min-width: 900px; height: 100%; pointer-events: none;">
+                <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; min-width: 900px; height: 100%; pointer-events: none;" />
+            </object>
+        </div>
+    </div>
+</div>
+
+<!-- Support Button (fixed bottom-left) -->
+<button class="support-btn" id="btnSupport">
+    ❤️ Support MicroTester
+</button>
+
+<script>
+    // ============================================================
+    // Start Page Logic
+    // ============================================================
+
+    // --- Modal helpers ---
+    function openModal(id) {
+        document.getElementById(id).classList.add('active');
+    }
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('active');
+    }
+
+    // Close buttons
+    document.querySelectorAll('.modal-close').forEach(btn => {
+        btn.addEventListener('click', () => {
+            closeModal(btn.dataset.close);
+        });
+    });
+
+    // Click outside modal to close
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.classList.remove('active');
+            }
+        });
+    });
+
+    // --- Quick Start ---
+    document.getElementById('btnQuickStart').addEventListener('click', () => {
+        openModal('modalMcuSelect');
+    });
+
+    // --- Already Flashed ---
+    document.getElementById('btnAlreadyFlashed').addEventListener('click', () => {
+        window.location.href = 'main.html';
+    });
+
+    // --- Support ---
+    document.getElementById('btnSupport').addEventListener('click', () => {
+        openModal('modalSupport');
+    });
+
+    // --- MCU Card Selection ---
+    let selectedMcu = '';
+
+    document.querySelectorAll('.mcu-card').forEach(card => {
+        card.addEventListener('click', () => {
+            if (card.classList.contains('disabled')) return;
+            selectedMcu = card.dataset.mcu;
+            const names = {
+                'stm32f103': 'STM32F103 (Blue Pill)',
+                'stm32f401': 'STM32F401 (Black Pill)',
+                'rp2040':    'RP2040 (Pico)',
+                'esp32s3':   'ESP32-S3'
+            };
+
+            // Update flash modal
+            const titleElem = document.getElementById('flashModalTitle');
+            if (titleElem) {
+                titleElem.textContent = `Flash - ${names[selectedMcu] || selectedMcu}`;
+            }
+
+            closeModal('modalMcuSelect');
+            openModal('modalFlash');
+        });
+    });
+
+    // --- Click schematic to open full resolution zoom ---
+    const flashSchematicContainer = document.getElementById('flashSchematicContainer');
+    if (flashSchematicContainer) {
+        flashSchematicContainer.addEventListener('click', () => {
+            openModal('modalSchematicZoom');
+        });
+    }
+
+    // --- Flash via WebUSB (placeholder) ---
+    document.getElementById('optFlashWebUSB').addEventListener('click', async () => {
+        const progress = document.getElementById('flashProgress');
+        const statusText = document.getElementById('flashStatusText');
+        const fill = document.getElementById('flashProgressFill');
+
+        progress.classList.add('active');
+        statusText.textContent = 'Requesting USB device...';
+        fill.style.width = '10%';
+
+        try {
+            // In a real implementation, this would use WebUSB DFU
+            // For now, show the flow
+            statusText.textContent = 'This feature requires DFU mode. Please use binary download.';
+            fill.style.width = '100%';
+        } catch (err) {
+            statusText.textContent = `Error: ${err.message}`;
+        }
+    });
+
+    // --- Download Binary ---
+    document.getElementById('optDownloadBin').addEventListener('click', () => {
+        // In production, link to actual binary files
+        const urls = {
+            'stm32f103': 'firmware/stm32f103/MicroTester_STM32F103.bin',
+            'stm32f401': 'firmware/stm32f401/MicroTester_STM32F401.bin',
+            'rp2040':    'firmware/rp2040/MicroTester_RP2040.uf2',
+            'esp32s3':   'firmware/esp32s3/MicroTester_ESP32S3.bin'
+        };
+
+        if (urls[selectedMcu]) {
+            alert(`Download: ${urls[selectedMcu]}\n\n(Binary file not yet built. Compile the firmware from source.)`);
+            // In production: window.location.href = urls[selectedMcu];
+        }
+    });
+</script>
+
+</body>
+</html>
