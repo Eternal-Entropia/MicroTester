@@ -6,6 +6,11 @@
 // Host to Device Commands
 #define CMD_VOLT_START    0x10
 #define CMD_VOLT_STOP     0x11
+#define CMD_VOLT_SET_BIAS 0x14
+
+#define CMD_GET_VREF      0x20  // Request VREFINT measurement
+#define PKT_VREF_DATA     0x20  // Reply with VREFINT measurement (uint16_t)
+
 #define CMD_OSC_START     0x12  // Payload: [pin(1)] [oversample(1)] [rateKHz_lo(1)] [rateKHz_hi(1)] [trigEdge(1)] [trigLevel_lo(1)] [trigLevel_hi(1)]
 #define CMD_OSC_STOP      0x13
 #define CMD_SIG_START     0x30  // Payload: [pin(1)] [waveform(1)] [freq_b0..3(4)] [duty(1)]

@@ -86,12 +86,55 @@ void loop() {
       cfg.pin = payload[0];
       cfg.oversample = payload[1];
       cfg.isOscilloscope = false;
+      cfg.enableBias = (len >= 3) ? (payload[2] != 0) : false;
       oscMode = false;
       adc_sampler_start(cfg);
     }
     else if (cmd == CMD_VOLT_STOP) {
       adc_sampler_stop();
       oscMode = false;
+    }
+    else if (cmd == CMD_VOLT_SET_BIAS && len >= 1) { // CMD_VOLT_SET_BIAS
+      adc_sampler_set_bias(payload[0] != 0);
+    }
+    else if (cmd == CMD_GET_VREF) {
+      adc_sampler_stop();
+      #if defined(ARDUINO_ARCH_STM32)
+      ADC->CCR |= (1 << 23); // TSVREFE
+      if ((RCC->APB2ENR & RCC_APB2ENR_ADC1EN) == 0) RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+      ADC1->CR1 = 0;
+      ADC1->CR2 = 0;
+      ADC1->SQR3 = 17; // Channel 17 (VREFINT)
+      ADC1->SMPR1 |= (7 << 21); // 480 cycles sampling time for VREFINT
+      ADC1->CR2 |= ADC_CR2_ADON;
+      for(volatile int i=0; i<1000; i++); // stabilize
+      
+      // Throw away first reading
+      ADC1->CR2 |= ADC_CR2_SWSTART;
+      while (!(ADC1->SR & ADC_SR_EOC));
+      uint16_t dump = ADC1->DR;
+      
+      uint32_t sum = 0;
+      for (int i=0; i<16; i++) {
+        ADC1->CR2 |= ADC_CR2_SWSTART;
+        while (!(ADC1->SR & ADC_SR_EOC));
+        sum += ADC1->DR;
+      }
+      uint16_t vref = sum / 16;
+      ADC1->CR2 = 0;
+      ADC->CCR &= ~(1 << 23);
+      #else
+      uint16_t vref = 1500;
+      #endif
+      
+      uint8_t packet[5];
+      packet[0] = PKT_VREF_DATA;
+      packet[1] = 2; // len low
+      packet[2] = 0; // len hi
+      packet[3] = vref & 0xFF;
+      packet[4] = (vref >> 8) & 0xFF;
+      robust_write(packet, 5);
+      usb_web.flush();
     }
     else if (cmd == CMD_OSC_START && len >= 10) {
       AdcConfig cfg;
@@ -103,6 +146,8 @@ void loop() {
       cfg.trigMode = payload[7];
       cfg.reqSamples = (uint16_t)payload[8] | ((uint16_t)payload[9] << 8);
       cfg.isOscilloscope = true;
+      cfg.enableBias = (len >= 11) ? (payload[10] != 0) : true;
+      cfg.bitness12 = (len >= 12) ? (payload[11] != 0) : false;
       
       oscMode = true;
       adc_sampler_stop();
@@ -169,6 +214,7 @@ void loop() {
   }
 
   // 2. Run Sampler & Logic Loops
+  adc_sampler_loop();
   adc_ets_loop();
   logic_analyzer_loop();
   comp_tester_loop();

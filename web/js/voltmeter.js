@@ -5,13 +5,14 @@
 window.voltConfig = {
     running: false,
     zeroOffset: parseFloat(localStorage.getItem('microtester_volt_zero_offset')) || 0.0,
-    gainRatio: 21.0,      // Vin = Vadc * gainRatio - baseOffset
-    baseOffset: 33.0,     // 33.0V DC offset for 10k/10k/100k bias divider
+    gainRatio: 11.0,      // Vin = Vadc * 11.0 (100k / 10k Divider, PB9 Hi-Z)
+    baseOffset: 0.0,      // No bias offset in voltmeter mode
     vRef: 3.3,
     adcRes: 4096,       // 12-bit ADC
     mode: 'dc',         // 'dc' or 'ac'
-    biasEnabled: true,  // DC bias
-    lastRawVin: 0.0     // Uncalibrated Vin for zero offset calibration
+    biasEnabled: false,  // PB9 bias state (Hi-Z)
+    lastRawVin: 0.0,    // Uncalibrated Vin for zero offset calibration
+    channel: 0          // Currently selected channel
 };
 
 // Alias for convenience
@@ -37,8 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnVoltResetTab = document.getElementById('btnVoltResetTab');
 
     function updateZeroBadge() {
-        const hasOffset = Math.abs(voltConfig.zeroOffset) > 0.0001;
-        const txt = (voltConfig.zeroOffset >= 0 ? '+' : '') + voltConfig.zeroOffset.toFixed(3) + ' V';
+        if (!window.Calibration) return;
+        const offset = window.Calibration.zeroOffsets[voltConfig.channel] || 0.0;
+        const hasOffset = Math.abs(offset) > 0.0001;
+        const txt = (offset >= 0 ? '+' : '') + offset.toFixed(3) + ' V';
 
         if (zeroOffsetBadge && zeroOffsetVal) {
             if (hasOffset) {
@@ -59,15 +62,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const doCalibZero = () => {
-        voltConfig.zeroOffset = voltConfig.lastRawVin;
-        localStorage.setItem('microtester_volt_zero_offset', voltConfig.zeroOffset.toString());
+        if (!window.Calibration) return;
+        window.Calibration.calibrateZero(voltConfig.channel, voltConfig.lastRawVin);
         updateZeroBadge();
     };
 
     const doResetZero = (e) => {
         if (e) { e.preventDefault(); e.stopPropagation(); }
-        voltConfig.zeroOffset = 0.0;
-        localStorage.removeItem('microtester_volt_zero_offset');
+        if (!window.Calibration) return;
+        window.Calibration.resetZero(voltConfig.channel);
         updateZeroBadge();
     };
 
@@ -76,6 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnResetZero) btnResetZero.addEventListener('click', doResetZero);
     if (btnVoltResetTab) btnVoltResetTab.addEventListener('click', doResetZero);
 
+    // Call updateZeroBadge occasionally to sync with shared Calibration
+    setInterval(updateZeroBadge, 1000);
     updateZeroBadge();
 
     // Enable button if connected
@@ -95,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const gainRatio = parseFloat(sel.getAttribute('data-divider')) || 1.0;
         const baseOffset = parseFloat(sel.getAttribute('data-baseoffset')) || 0.0;
         const biasEnabled = sel.getAttribute('data-bias') === 'true';
+        const autoPolarity = sel.getAttribute('data-autopolarity') === 'true';
         const maxV = sel.value;
 
         // Update info labels
@@ -109,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         voltConfig.gainRatio = gainRatio;
         voltConfig.baseOffset = baseOffset;
         voltConfig.biasEnabled = biasEnabled;
+        voltConfig.autoPolarity = autoPolarity;
     }
 
     if (cfgVoltRange) {
@@ -129,17 +136,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!voltConfig.running || !microTester.device) return;
 
-        const pin = parseInt(document.getElementById('cfgVoltChannel').value);
+        const pin = parseInt(document.getElementById('cfgVoltChannel').value) || 0;
+        voltConfig.channel = pin;
         applySelectedRange();
 
+        const biasMode = (voltConfig.biasEnabled || voltConfig.baseOffset > 0) ? 1 : 0;
         microTester.sendCommand(CMD_VOLT_STOP);
-        microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample]));
+        microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
     }
 
     // --- Live-apply: Channel & Oversampling & Sample Rate ---
     const cfgVoltChannel = document.getElementById('cfgVoltChannel');
     if (cfgVoltChannel) {
-        cfgVoltChannel.addEventListener('change', reapplyIfRunning);
+        cfgVoltChannel.addEventListener('change', () => {
+            voltConfig.channel = parseInt(cfgVoltChannel.value) || 0;
+            reapplyIfRunning();
+        });
+        voltConfig.channel = parseInt(cfgVoltChannel.value) || 0;
     }
     const cfgVoltOversampling = document.getElementById('cfgVoltOversampling');
     if (cfgVoltOversampling) {
@@ -164,17 +177,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnStartStop.classList.add('btn-success');
             } else {
                 // Start — read settings
-                const pin = parseInt(document.getElementById('cfgVoltChannel').value);
+                const pin = parseInt(document.getElementById('cfgVoltChannel').value) || 0;
+                voltConfig.channel = pin;
                 const oversample = parseInt(document.getElementById('cfgVoltOversampling').value);
 
                 applySelectedRange();
+                const biasMode = (voltConfig.biasEnabled || voltConfig.baseOffset > 0) ? 1 : 0;
 
                 voltConfig.running = true;
                 btnStartStop.innerHTML = '■ Stop';
                 btnStartStop.classList.remove('btn-success');
                 btnStartStop.classList.add('btn-danger');
 
-                microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample]));
+                microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
             }
         });
     }
@@ -268,18 +283,12 @@ function processVoltmeterData(payload) {
 
     // Helper to convert raw ADC reading to Vin input voltage
     function rawToVin(raw) {
-        const vAdc = (raw / voltConfig.adcRes) * voltConfig.vRef;
-        let vin = 0;
-        if (voltConfig.baseOffset > 0) {
-            vin = (vAdc * voltConfig.gainRatio) - voltConfig.baseOffset;
-        } else {
-            let v = vAdc;
-            if (voltConfig.biasEnabled) v -= 1.65;
-            vin = v * voltConfig.gainRatio;
-        }
-        return vin - (voltConfig.zeroOffset || 0);
+        if (!window.Calibration) return 0;
+        let vin = window.Calibration.calculateVolts(voltConfig.channel, raw, 12, voltConfig.gainRatio, voltConfig.baseOffset, 0);
+        if (Math.abs(vin) < 0.05) vin = 0.0;
+        return vin;
     }
-
+    
     // Formatters
     function formatVolt(v) {
         if (isNaN(v)) return '-.--- V';
@@ -308,6 +317,34 @@ function processVoltmeterData(payload) {
     }
 
     const avgRaw = sum / targetSamples;
+
+    // Browser-Side Auto-Polarity via WebUSB CMD_VOLT_SET_BIAS (0x14)
+    if (voltConfig.autoPolarity) {
+        // If bias is OFF, only turn ON if maxRaw is very low (clamped to 0V/negative, NO positive noise).
+        // Floating probes will pick up positive noise (maxRaw > 5) and won't trigger this.
+        if (!voltConfig.biasEnabled && maxRaw <= 2) {
+            voltConfig.biasEnabled = true;
+            voltConfig.baseOffset = 33.0;
+            voltConfig.gainRatio = 21.0;
+            if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([1]));
+        } 
+        // If bias is ON, 0V is ~1950. Floating is ~2048. 
+        // Turn OFF if avgRaw >= 2000 (meaning it's floating or positive).
+        else if (voltConfig.biasEnabled && avgRaw >= 2000) {
+            voltConfig.biasEnabled = false;
+            voltConfig.baseOffset = 0.0;
+            voltConfig.gainRatio = 11.0;
+            if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([0]));
+        }
+    }
+
+    // Calculate uncalibrated voltage for zero-offset calibration
+    if (window.Calibration) {
+        let uncal = window.Calibration.calculateVolts(-1, avgRaw, 12, voltConfig.gainRatio, voltConfig.baseOffset, 0);
+        if (Math.abs(uncal) < 0.05) uncal = 0.0;
+        voltConfig.lastRawVin = uncal;
+    }
+
     const vDc = rawToVin(avgRaw);
     const vMax = rawToVin(maxRaw);
     const vMin = rawToVin(minRaw);

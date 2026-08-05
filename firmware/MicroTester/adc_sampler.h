@@ -7,6 +7,8 @@ typedef struct {
     uint8_t pin;
     uint8_t oversample;
     bool isOscilloscope;
+    bool enableBias;
+    bool bitness12;
     uint32_t rateKHz;
     uint8_t trigEdge;
     uint16_t trigLevel;
@@ -17,6 +19,8 @@ typedef struct {
 void adc_sampler_init();
 void adc_sampler_start(AdcConfig config);
 void adc_sampler_stop();
+void adc_sampler_loop();
+void adc_sampler_set_bias(bool enable);
 
 // Frame-based API
 // Returns true if a frame is ready to transmit

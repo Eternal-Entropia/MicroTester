@@ -3,9 +3,11 @@
 const MICROTESTER_VID = 0xCAFE; // Default TinyUSB VID
 
 // Protocol constants (mirror protocol.h)
-const CMD_VOLT_START  = 0x10;
-const CMD_VOLT_STOP   = 0x11;
-const CMD_OSC_START   = 0x12;
+const CMD_VOLT_START    = 0x10;
+const CMD_VOLT_STOP     = 0x11;
+const CMD_VOLT_SET_BIAS = 0x14;
+const CMD_GET_VREF      = 0x20;
+const CMD_OSC_START     = 0x12;
 const CMD_OSC_STOP    = 0x13;
 const CMD_SIG_START   = 0x30;
 const CMD_SIG_STOP    = 0x31;
@@ -16,6 +18,7 @@ const CMD_COMP_STOP  = 0x51;
 
 const PKT_VOLTMETER_DATA     = 0x10;
 const PKT_OSCILLOSCOPE_DATA  = 0x12;
+const PKT_VREF_DATA          = 0x20;
 const PKT_LOGIC_DATA         = 0x40;
 const PKT_COMP_RESULT        = 0x50;
 

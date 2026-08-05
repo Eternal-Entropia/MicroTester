@@ -7,28 +7,28 @@
  </defs>
  <!-- Background Grid -->
  <!-- Header Title -->
- <!-- SECTION 1: VOLTMETER AND OSCILLOSCOPE (PA0) -->
+ <!-- SECTION 1: VOLTMETER AND OSCILLOSCOPE (PA1) -->
  <!-- SECTION 2: COMPONENT TESTER PROBES (TP1, TP2, TP3) -->
  <!-- SECTION 3: SIGNAL GENERATOR OUTPUT -->
  <g>
   <title>Layer 1</title>
   <text x="486" y="20" fill="#38bdf8" font-size="18" font-weight="bold" letter-spacing="0.5" id="svg_4">STM32F401 (BLACK PILL) WIRING SCHEMATIC DIAGRAM</text>
   <g id="svg_6">
-   <text x="26" y="37" fill="#38bdf8" font-size="13" font-weight="bold" id="svg_7">[1] VOLTMETER &amp; OSCILLOSCOPE INPUT CIRCUIT (CH0 / PA0)</text>
-   <!-- Net Tag PA0 -->
+   <text x="26" y="37" fill="#38bdf8" font-size="13" font-weight="bold" id="svg_7">[1] VOLTMETER &amp; OSCILLOSCOPE INPUT CIRCUIT (CH1-4 / PA1-4)</text>
+   <!-- Net Tag PA1 -->
    <g id="svg_8">
     <polygon points="34,161 114,161 129,171 114,181 34,181 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_9"/>
-    <text x="46" y="175" fill="#38bdf8" font-size="12" font-weight="bold" id="svg_10">PA0</text>
+    <text x="38" y="175" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_10">PA1-PA4</text>
    </g>
    <!-- Cyan Wires -->
    <line x1="129" y1="171" x2="234" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_11"/>
    <circle cx="234" cy="171" r="4.5" fill="#ef4444" id="svg_12"/>
-   <!-- Resistor R1 (100k Series to Probe) -->
+   <!-- Resistor R1 (1M Series to Probe) -->
    <line x1="234" y1="171" x2="314" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_13"/>
    <g id="svg_14">
     <rect x="314" y="159" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_15"/>
     <text x="341.5" y="153" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_16">R1</text>
-    <text x="341.5" y="175" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_17">100k</text>
+    <text x="341.5" y="175" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_17">1M</text>
    </g>
    <line x1="369" y1="171" x2="464" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_18"/>
    <!-- Terminal Flag: INPUT PROBE (+) -->
@@ -37,12 +37,12 @@
     <text x="476" y="175" fill="#ffffff" font-size="11" font-weight="bold" id="svg_21">INPUT PROBE (+)</text>
    </g>
    <text x="464" y="199" fill="#94a3b8" font-size="10" id="svg_22">Range: ±30V (with 1.65V Bias)</text>
-   <!-- Resistor R2 (10k to GND) -->
+   <!-- Resistor R2 (100k to GND) -->
    <line x1="234" y1="171" x2="234" y2="211" stroke="#38bdf8" stroke-width="2.5" id="svg_23"/>
    <g id="svg_24">
     <rect x="222" y="211" width="24" height="45" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_25"/>
     <text x="254" y="231" fill="#fbbf24" font-size="11" font-weight="bold" id="svg_26">R2</text>
-    <text x="254" y="246" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_27">10k</text>
+    <text x="254" y="246" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_27">100k</text>
    </g>
    <line x1="234" y1="256" x2="234" y2="271" stroke="#38bdf8" stroke-width="2.5" id="svg_28"/>
    <!-- GND Symbol -->
@@ -50,17 +50,28 @@
    <line x1="224" y1="276" x2="244" y2="276" stroke="#cbd5e1" stroke-width="2" id="svg_30"/>
    <line x1="229" y1="281" x2="239" y2="281" stroke="#cbd5e1" stroke-width="1.5" id="svg_31"/>
    <text x="256" y="276" fill="#cbd5e1" font-size="10" font-weight="bold" id="svg_32">GND</text>
-   <!-- Resistor R3 (10k Bias to +3.3V) -->
+   <!-- Resistor R3 (100k Bias to PB9-PB6) -->
    <line x1="234" y1="171" x2="234" y2="136" stroke="#38bdf8" stroke-width="2.5" id="svg_33"/>
    <g id="svg_34">
     <rect x="222" y="91" width="24" height="45" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_35"/>
     <text x="254" y="111" fill="#fbbf24" font-size="11" font-weight="bold" id="svg_36">R3</text>
-    <text x="254" y="126" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_37">10k</text>
+    <text x="254" y="126" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_37">100k</text>
    </g>
    <line x1="234" y1="91" x2="234" y2="76" stroke="#38bdf8" stroke-width="2.5" id="svg_38"/>
-   <!-- VCC Symbol Arrow -->
-   <polygon points="234,66 227,76 241,76 " fill="#ef4444" id="svg_39"/>
-   <text x="249" y="74" fill="#ef4444" font-size="11" font-weight="bold" id="svg_40">+3.3V</text>
+   <!-- Bias Control Pin -->
+   <polygon points="234,66 227,76 241,76 " fill="#38bdf8" id="svg_39"/>
+   <text x="249" y="74" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_40">PB9-PB6</text>
+   
+   <!-- Multi-Channel Explanation -->
+   <g id="svg_expl">
+    <rect x="660" y="55" width="310" height="135" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5" rx="5"/>
+    <text x="675" y="75" fill="#38bdf8" font-size="12" font-weight="bold">MULTI-CHANNEL MAPPING:</text>
+    <text x="675" y="100" fill="#f8fafc" font-size="11">• CH1: Input = PA1, Bias = PB9</text>
+    <text x="675" y="120" fill="#f8fafc" font-size="11">• CH2: Input = PA2, Bias = PB8</text>
+    <text x="675" y="140" fill="#f8fafc" font-size="11">• CH3: Input = PA3, Bias = PB7</text>
+    <text x="675" y="160" fill="#f8fafc" font-size="11">• CH4: Input = PA4, Bias = PB6</text>
+    <text x="675" y="180" fill="#94a3b8" font-size="10">(Build this exact circuit for each channel you need)</text>
+   </g>
   </g>
   <g id="svg_41">
    <text x="292" y="266" fill="#22c55e" font-size="13" font-weight="bold" id="svg_42">[2] COMPONENT TESTER PROBES (TP1, TP2, TP3 WIRING)</text>

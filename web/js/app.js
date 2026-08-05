@@ -1,4 +1,21 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // 0. Sidebar Collapse Toggle
+    const btnToggleSidebar = document.getElementById('btnToggleSidebar');
+    const sidebar = document.getElementById('sidebar');
+
+    if (btnToggleSidebar && sidebar) {
+        if (localStorage.getItem('sidebar_collapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+        }
+
+        btnToggleSidebar.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed'));
+            // Dispatch resize event to trigger canvas redrawing
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+
     // 1. Sidebar Tab Switching
     const navItems = document.querySelectorAll('.nav-item[data-panel]');
     const tabPanels = document.querySelectorAll('.tab-panel');
@@ -22,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Update title (get text without icon)
             if (topBarTitle) {
-                const textSpan = item.querySelectorAll('span')[1];
+                const textSpan = item.querySelector('span:not(.nav-item-icon)');
                 if (textSpan) {
                     topBarTitle.innerText = textSpan.innerText;
                 }

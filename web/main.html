@@ -53,6 +53,89 @@
             width: 100%;
             height: auto;
         }
+
+        /* Custom Channel Checkboxes */
+        .channel-toggles {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .ch-toggle {
+            position: relative;
+            cursor: pointer;
+            user-select: none;
+        }
+        .ch-toggle input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+        }
+        .ch-toggle span {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 14px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #9ca3af;
+            background-color: rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .ch-toggle:hover span {
+            transform: translateY(-1px);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        .ch-toggle input:focus-visible ~ span {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+
+        /* CH1: Blue */
+        .ch-toggle.ch-blue input:checked ~ span {
+            background-color: rgba(59, 130, 246, 0.15);
+            border-color: #3b82f6;
+            color: #60a5fa;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.3), inset 0 0 8px rgba(59, 130, 246, 0.2);
+        }
+        .ch-toggle.ch-blue:hover input:checked ~ span {
+            background-color: rgba(59, 130, 246, 0.25);
+        }
+
+        /* CH2: Green */
+        .ch-toggle.ch-green input:checked ~ span {
+            background-color: rgba(34, 197, 94, 0.15);
+            border-color: #22c55e;
+            color: #4ade80;
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.3), inset 0 0 8px rgba(34, 197, 94, 0.2);
+        }
+        .ch-toggle.ch-green:hover input:checked ~ span {
+            background-color: rgba(34, 197, 94, 0.25);
+        }
+
+        /* CH3: Red */
+        .ch-toggle.ch-red input:checked ~ span {
+            background-color: rgba(239, 68, 68, 0.15);
+            border-color: #ef4444;
+            color: #f87171;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.3), inset 0 0 8px rgba(239, 68, 68, 0.2);
+        }
+        .ch-toggle.ch-red:hover input:checked ~ span {
+            background-color: rgba(239, 68, 68, 0.25);
+        }
+
+        /* CH4: Yellow */
+        .ch-toggle.ch-yellow input:checked ~ span {
+            background-color: rgba(234, 179, 8, 0.15);
+            border-color: #eab308;
+            color: #facc15;
+            box-shadow: 0 0 12px rgba(234, 179, 8, 0.3), inset 0 0 8px rgba(234, 179, 8, 0.2);
+        }
+        .ch-toggle.ch-yellow:hover input:checked ~ span {
+            background-color: rgba(234, 179, 8, 0.25);
+        }
     </style>
 </head>
 
@@ -61,13 +144,23 @@
     <div class="main-container">
 
         <!-- ===================== Sidebar ===================== -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-logo">MicroTester</div>
+                <div class="sidebar-logo">
+                    <span style="color: #38bdf8;">Micro</span>Tester
+                </div>
+                <button class="sidebar-toggle-btn" id="btnToggleSidebar" title="Toggle Sidebar">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                </button>
             </div>
 
             <nav class="sidebar-nav">
-                <button class="nav-item active" data-panel="voltmeter">
+                <button class="nav-item active" data-panel="voltmeter" title="Voltmeter">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -76,17 +169,15 @@
                     </span>
                     <span>Voltmeter</span>
                 </button>
-                <button class="nav-item" data-panel="oscilloscope">
+                <button class="nav-item" data-panel="oscilloscope" title="Oscilloscope">
                     <span class="nav-item-icon">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="2" y="3" width="20" height="18" rx="2" />
-                            <path d="M4 12h4l2-6 4 12 2-6h4" />
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                         </svg>
                     </span>
                     <span>Oscilloscope</span>
                 </button>
-                <button class="nav-item" data-panel="component">
+                <button class="nav-item" data-panel="component" title="Component Tester">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -97,7 +188,7 @@
                     <span>Component Tester</span>
                 </button>
 
-                <button class="nav-item" data-panel="logic">
+                <button class="nav-item" data-panel="logic" title="Logic Analyzer">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -107,7 +198,7 @@
                     </span>
                     <span>Logic Analyzer</span>
                 </button>
-                <button class="nav-item" data-panel="freqresp">
+                <button class="nav-item" data-panel="freqresp" title="Frequency Response">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -120,7 +211,7 @@
 
                 <div class="nav-divider"></div>
 
-                <button class="nav-item" data-panel="siggen">
+                <button class="nav-item" data-panel="siggen" title="Signal Gen">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -130,14 +221,28 @@
                     <span>Signal Gen</span>
                     <div class="bg-indicator" id="sigGenIndicator"></div>
                 </button>
-                <button class="nav-item" data-panel="calibration">
+                <button class="nav-item" data-panel="calibration" title="Calibration">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="4" y1="21" x2="4" y2="14" />
+                            <line x1="4" y1="10" x2="4" y2="3" />
+                            <line x1="12" y1="21" x2="12" y2="12" />
+                            <line x1="12" y1="8" x2="12" y2="3" />
+                            <line x1="20" y1="21" x2="20" y2="16" />
+                            <line x1="20" y1="12" x2="20" y2="3" />
+                            <line x1="1" y1="14" x2="7" y2="14" />
+                            <line x1="9" y1="8" x2="15" y2="8" />
+                            <line x1="17" y1="16" x2="23" y2="16" />
+                        </svg>
+                    </span>
                     <span>Calibration</span>
                 </button>
             </nav>
 
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Beta v1
+                    MicroTester Beta v2
                 </div>
             </div>
         </aside>
@@ -226,10 +331,6 @@
                             <div class="volt-info-label">Effective Bits</div>
                             <div class="volt-info-value text-mono" id="voltEffBits">18</div>
                         </div>
-                        <div class="volt-info-item">
-                            <div class="volt-info-label">Divider Ratio</div>
-                            <div class="volt-info-value text-mono" id="voltDivRatioInfo">21.0x</div>
-                        </div>
                     </div>
 
                     <!-- AC Signal Parameters Grid -->
@@ -296,10 +397,10 @@
                             <div class="config-field">
                                 <label>Channel</label>
                                 <select id="cfgVoltChannel">
-                                    <option value="0">CH0 (PA0 - Voltmeter)</option>
-                                    <option value="1">CH1 (PA1)</option>
-                                    <option value="2">CH2 (PA2)</option>
-                                    <option value="3">CH3 (PA3)</option>
+                                    <option value="0">CH1 (PA1)</option>
+                                    <option value="1">CH2 (PA2)</option>
+                                    <option value="2">CH3 (PA3)</option>
+                                    <option value="3">CH4 (PA4)</option>
                                 </select>
                             </div>
                             <div class="config-field">
@@ -322,8 +423,7 @@
                             <div class="config-field">
                                 <label>Voltage Range</label>
                                 <select id="cfgVoltRange">
-                                    <option value="±30" data-divider="21.0" data-baseoffset="33.0" data-bias="false" selected>±30V (10k / 10k / 100k Bias Divider — встроенное смещение 33V)</option>
-                                    <option value="3.3" data-divider="1.0" data-baseoffset="0.0" data-bias="false">3.3V (Direct — 0..3.3V без смещения)</option>
+                                    <option value="±30" data-divider="11.0" data-baseoffset="0.0" data-bias="false" data-autopolarity="true" selected>±30V Auto-Polarity</option>
                                 </select>
                             </div>
                         </div>
@@ -331,8 +431,6 @@
                         <div class="mt-16 flex gap-8 items-center">
                             <span class="text-xs text-muted">
                                 Range: <strong id="voltMaxInput">±30V</strong>
-                                &nbsp;·&nbsp;
-                                Divider: <strong id="voltDivRatio">21.0x</strong>
                             </span>
                         </div>
                     </div>
@@ -402,14 +500,27 @@
                         <div class="config-title">⚙ Oscilloscope Settings</div>
                         <div class="config-grid">
                             <div class="config-field">
-                                <label>Channel</label>
-                                <select id="cfgOscChannel">
-                                    <option value="0">CH0 (PA0)</option>
-                                    <option value="1">CH1 (PA1)</option>
-                                    <option value="2">CH2 (PA2)</option>
-                                    <option value="3">CH3 (PA3)</option>
-                                </select>
+                                <label>Channels</label>
+                                <div class="channel-toggles">
+                                    <label class="ch-toggle ch-blue">
+                                        <input type="checkbox" id="cfgOscCh0" checked>
+                                        <span>CH1</span>
+                                    </label>
+                                    <label class="ch-toggle ch-green">
+                                        <input type="checkbox" id="cfgOscCh1">
+                                        <span>CH2</span>
+                                    </label>
+                                    <label class="ch-toggle ch-red">
+                                        <input type="checkbox" id="cfgOscCh2">
+                                        <span>CH3</span>
+                                    </label>
+                                    <label class="ch-toggle ch-yellow">
+                                        <input type="checkbox" id="cfgOscCh3">
+                                        <span>CH4</span>
+                                    </label>
+                                </div>
                             </div>
+
                             <div class="config-field">
                                 <label>Sample Rate (kHz)</label>
                                 <select id="cfgOscSampleRate">
@@ -421,10 +532,19 @@
                                     <option value="500">500 kHz</option>
                                     <option value="1000" selected>1 MHz (Realtime)</option>
                                     <option value="2000">2 MHz (Realtime)</option>
+                                    <option value="3000">3 MHz (Realtime / 8-bit only)</option>
+                                    <option value="3818">3.8 MHz (Max Realtime / 8-bit only)</option>
                                     <option value="5000">5 MHz (ETS)</option>
                                     <option value="10000">10 MHz (ETS)</option>
                                     <option value="20000">20 MHz (ETS)</option>
                                     <option value="50000">50 MHz (ETS)</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>ADC Resolution</label>
+                                <select id="cfgOscResolution">
+                                    <option value="8" selected>8-bit (20k pts, 255 steps)</option>
+                                    <option value="12">12-bit (10k pts, 4095 steps)</option>
                                 </select>
                             </div>
                             <div class="config-field">
@@ -759,44 +879,53 @@
                             Short your measurement probes to GND to calibrate zero voltage offsets for Voltmeter and Oscilloscope channels.
                         </p>
 
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                            <!-- Voltmeter Zero Calibration -->
-                            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
-                                <h4 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                                    <span>⚡ Voltmeter Zero Offset</span>
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
+                            
+                            <!-- VDDA / VREF Calibration -->
+                            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.15); border-radius: 12px; padding: 20px;">
+                                <h4 style="margin: 0 0 8px 0; color: #a855f7; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                    <span>🔋 Internal VREF (1.21V) Calibration</span>
                                 </h4>
                                 <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
-                                    Short voltmeter probes together (connect to GND), then click calibrate.
+                                    The STM32 has an internal 1.21V reference. By measuring it, we can calculate the exact analog supply voltage (VDDA), drastically improving ADC accuracy.
                                 </p>
                                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                                    <button class="btn btn-primary btn-sm" id="btnVoltCalibTab">
-                                        🎯 Calibrate Voltmeter Zero
+                                    <button class="btn btn-primary btn-sm" id="btnReqVrefTab" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.5);">
+                                        🔄 Measure VREF
                                     </button>
-                                    <span id="voltZeroBadgeTab" class="status-badge" style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
-                                        Offset: <span id="voltZeroValTab">0.000 V</span>
-                                        <span id="btnVoltResetTab" style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;" title="Reset Zero">×</span>
+                                    <span id="vddaBadgeTab" class="status-badge" style="font-size: 11px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                        VDDA: <span id="vddaValTab">Unknown</span>
                                     </span>
                                 </div>
                             </div>
 
-                            <!-- Oscilloscope Zero Calibration -->
+                            <!-- Unified Channel Zero Calibration -->
                             <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
                                 <h4 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                                    <span>📈 Oscilloscope Zero Offset</span>
+                                    <span>⚡ Unified Channel Zero Offset</span>
                                 </h4>
                                 <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
-                                    Short oscilloscope input pin (PA0/CH0) to GND, then click calibrate.
+                                    Zero offsets are now shared between the Voltmeter and Oscilloscope and are saved per-pin.
+                                    Select a channel, short its input pin to GND, and click Calibrate.
                                 </p>
-                                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                                    <button class="btn btn-primary btn-sm" id="btnOscCalibTab">
-                                        🎯 Calibrate Oscilloscope Zero
+                                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                                    <select class="form-control" id="calibChannelSelect" style="width: 140px; font-size: 12px;">
+                                        <option value="0">CH1 (PA1)</option>
+                                        <option value="1">CH2 (PA2)</option>
+                                        <option value="2">CH3 (PA3)</option>
+                                        <option value="3">CH4 (PA4)</option>
+                                        <option value="4">CH5 (PA5)</option>
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" id="btnUnifiedCalibTab">
+                                        🎯 Calibrate Zero
                                     </button>
-                                    <span id="oscZeroBadgeTab" class="status-badge" style="display: none; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
-                                        Offset: <span id="oscZeroValTab">0.000 V</span>
-                                        <span id="btnOscResetTab" style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;" title="Reset Zero">×</span>
+                                    <span id="unifiedZeroBadgeTab" class="status-badge" style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px; border-radius: 6px;">
+                                        Offset: <span id="unifiedZeroValTab">0.000 V</span>
+                                        <span id="btnUnifiedResetTab" style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;" title="Reset Zero">×</span>
                                     </span>
                                 </div>
                             </div>
+
                         </div>
                     </div>
                 </div>
@@ -807,6 +936,7 @@
 
     <script src="js/app.js"></script>
     <script src="js/usb_protocol.js"></script>
+    <script src="js/calibration.js"></script>
     <script src="js/voltmeter.js"></script>
     <script src="js/oscilloscope.js"></script>
     <script src="js/siggen.js"></script>

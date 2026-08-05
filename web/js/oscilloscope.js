@@ -13,12 +13,19 @@
     const oscState = {
         running: false,
         channel: 0,
+        activeChannels: [0],
+        multiChannel: false,
+        currentMultiIdx: 0,
+        multiFrames: [null, null, null, null],
+        syncPending: false,
         oversample: 0,
         sampleRateKHz: 913,   // default estimate, updated by actual throughput
         vRef: 3.3,
         adcRes: 255,          // 8-bit resolution
         divider: 1.0,
         biasEnabled: true,
+        baseOffsetConfig: 0.0,
+        resolution: 8,
 
         // Display
         timePerDiv: 0.002,    // seconds per division (2ms default)
@@ -75,10 +82,23 @@
     }
 
     function rawToVolts(raw) {
-        const vAdc = (raw / oscState.adcRes) * oscState.vRef;
-        // Resistor Divider: 10k GND, 10k 3.3V, 100k Vin => Vin = 21.0 * Vadc - 33.0
-        const uncal = 21.0 * vAdc - 33.0;
-        return uncal - (oscState.zeroOffset || 0);
+        let ch = oscState.multiChannel ? oscState.activeChannels[oscState.currentMultiIdx] : oscState.channel;
+        if (ch === 0 || ch <= 3) {
+            let freqComp = 0;
+            if (oscState.biasEnabled) {
+                let maxRate = oscState.resolution === 12 ? 2800 : 3818;
+                let actualRateKHz = Math.min(oscState.sampleRateKHz, maxRate);
+                freqComp = (actualRateKHz - 1000) * 0.0022; 
+            }
+            
+            if (window.Calibration) {
+                return window.Calibration.calculateVolts(ch, raw, oscState.resolution, oscState.divider, oscState.baseOffsetConfig, freqComp);
+            }
+            return 0;
+        } else {
+            // Logic mode or unsupported
+            return raw > 127 ? 3.3 : 0.0;
+        }
     }
 
     // ======================== Ring Buffer ========================    // Buffer logic removed (handled by hardware frames now)}
@@ -333,7 +353,7 @@
         }
     }
 
-    function drawWaveform(samples, w, h, triggerRes) {
+    function drawWaveform(samples, w, h, triggerRes, colorIdx) {
         if (!samples || samples.length < 2) return;
 
         const totalVolts = oscState.voltsPerDiv * GRID_DIVISIONS_Y;
@@ -353,10 +373,16 @@
         const pxPerSample = isDecimated ? (w / (samples.length / 2)) : (w / samples.length);
 
         // Glow effect
-        ctx.shadowColor = '#22d3ee';
+        let strokeColor = '#22d3ee';
+        if (colorIdx === 0) strokeColor = '#3b82f6';
+        else if (colorIdx === 1) strokeColor = '#22c55e';
+        else if (colorIdx === 2) strokeColor = '#ef4444';
+        else if (colorIdx === 3) strokeColor = '#eab308';
+
+        ctx.shadowColor = strokeColor;
         ctx.shadowBlur = 6;
 
-        ctx.strokeStyle = '#22d3ee';
+        ctx.strokeStyle = strokeColor;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
 
@@ -499,33 +525,64 @@
 
         const sampleRate = oscState.calculatedSampleRate || 913000;
 
-        const displaySamples = oscState.currentFrame || new Float64Array(0);
-
-        let triggerRes = { index: -1, frac: 0 };
-        if (displaySamples.length > 0) {
-            triggerRes = { index: displaySamples.length / 2, frac: 0 };
-            oscState.triggered = true;
-            if (oscState.triggerMode === 'single' && !oscState.singleCaptured) {
-                oscState.singleCaptured = true;
+        if (oscState.multiChannel) {
+            let anyTriggered = false;
+            let measSamples = new Float64Array(0);
+            for (let c = 0; c < 4; c++) {
+                if (!oscState.activeChannels.includes(c)) continue;
+                let samples = (oscState.multiFrames && oscState.multiFrames[c]) ? oscState.multiFrames[c] : new Float64Array(0);
+                if (samples.length > 0) {
+                    measSamples = samples;
+                    let triggerRes = { index: samples.length / 2, frac: 0 };
+                    drawWaveform(samples, w, h, triggerRes, c);
+                    anyTriggered = true;
+                }
             }
-        } else {
-            oscState.triggered = false;
-            if (oscState.triggerMode === 'normal') {
+            oscState.triggered = anyTriggered;
+            if (oscState.triggerMode === 'single' && anyTriggered && !oscState.singleCaptured) {
+                oscState.singleCaptured = true;
+            } else if (!anyTriggered && oscState.triggerMode === 'normal') {
                 oscState.animFrameId = requestAnimationFrame(renderFrame);
                 return;
             }
-        }
+            drawTriggerLine(w, h);
+            drawLabels(w, h);
+            drawStatusOverlay(w, h);
 
-        drawWaveform(displaySamples, w, h, triggerRes);
-        drawTriggerLine(w, h);
-        drawLabels(w, h);
-        drawStatusOverlay(w, h);
+            if (measSamples.length > 10) {
+                const sampleRate = Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) * 1000;
+                const meas = computeMeasurements(measSamples, sampleRate);
+                updateMeasurementsUI(meas);
+            }
+        } else {
+            const displaySamples = oscState.currentFrame || new Float64Array(0);
 
-        // Update measurements
-        if (displaySamples.length > 10) {
-            const sampleRate = oscState.sampleRateKHz * 1000;
-            const meas = computeMeasurements(displaySamples, sampleRate);
-            updateMeasurementsUI(meas);
+            let triggerRes = { index: -1, frac: 0 };
+            if (displaySamples.length > 0) {
+                triggerRes = { index: displaySamples.length / 2, frac: 0 };
+                oscState.triggered = true;
+                if (oscState.triggerMode === 'single' && !oscState.singleCaptured) {
+                    oscState.singleCaptured = true;
+                }
+            } else {
+                oscState.triggered = false;
+                if (oscState.triggerMode === 'normal') {
+                    oscState.animFrameId = requestAnimationFrame(renderFrame);
+                    return;
+                }
+            }
+
+            drawWaveform(displaySamples, w, h, triggerRes, oscState.channel);
+            drawTriggerLine(w, h);
+            drawLabels(w, h);
+            drawStatusOverlay(w, h);
+
+            // Update measurements
+            if (displaySamples.length > 10) {
+                const sampleRate = oscState.sampleRateKHz * 1000;
+                const meas = computeMeasurements(displaySamples, sampleRate);
+                updateMeasurementsUI(meas);
+            }
         }
 
         oscState.animFrameId = requestAnimationFrame(renderFrame);
@@ -561,8 +618,8 @@
         while (oscPacketBuffer.length >= 3) {
             const pktType = oscPacketBuffer[0];
             
-            // Valid packets: 0x10 (Volt), 0x12 (Osc), 0x40 (Logic), 0x50 (Comp)
-            if (pktType !== 0x10 && pktType !== 0x12 && pktType !== 0x40 && pktType !== 0x50) {
+            // Valid packets: 0x10 (Volt), 0x12 (Osc), 0x20 (Vref), 0x40 (Logic), 0x50 (Comp)
+            if (pktType !== 0x10 && pktType !== 0x12 && pktType !== 0x20 && pktType !== 0x40 && pktType !== 0x50) {
                 oscPacketBuffer = oscPacketBuffer.slice(1);
                 continue;
             }
@@ -577,7 +634,9 @@
             if (oscPacketBuffer.length >= length + 3) {
                 const payload = oscPacketBuffer.slice(3, length + 3);
 
-                if (pktType === 0x12) { // PKT_OSCILLOSCOPE_DATA
+                if (pktType === 0x20) { // PKT_VREF_DATA (Sync Token)
+                    oscState.syncPending = false;
+                } else if (pktType === 0x12) { // PKT_OSCILLOSCOPE_DATA
                     try {
                         processOscData(payload);
                     } catch (e) {
@@ -595,16 +654,52 @@
     function processOscData(payload) {
         // Frame received
         if (payload.length === 0) return;
+        
+        if (oscState.syncPending) return; // Drop stale frames while waiting for sync
 
         // Don't push new data if single-captured
         if (oscState.triggerMode === 'single' && oscState.singleCaptured) return;
 
-        const frame = new Float64Array(payload.length);
-        for (let i = 0; i < payload.length; i++) {
-            frame[i] = rawToVolts(payload[i]);
+        if (oscState.resolution === 12) {
+            const numSamples = Math.floor(payload.length / 2);
+            const frame = new Float64Array(numSamples);
+            const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+            for (let i = 0; i < numSamples; i++) {
+                const raw = view.getUint16(i * 2, true); // Little endian
+                frame[i] = rawToVolts(raw);
+            }
+            if (oscState.multiChannel) {
+                if (!oscState.multiFrames) oscState.multiFrames = [null, null, null, null];
+                let currentCh = oscState.activeChannels[oscState.currentMultiIdx];
+                oscState.multiFrames[currentCh] = frame;
+                oscState.currentMultiIdx = (oscState.currentMultiIdx + 1) % oscState.activeChannels.length;
+                if (oscState.running && oscState.triggerMode !== 'single') {
+                    restartOsc();
+                } else if (oscState.triggerMode === 'single' && oscState.currentMultiIdx === 0) {
+                    oscState.singleCaptured = true;
+                }
+            } else {
+                oscState.currentFrame = frame;
+            }
+        } else {
+            const frame = new Float64Array(payload.length);
+            for (let i = 0; i < payload.length; i++) {
+                frame[i] = rawToVolts(payload[i]);
+            }
+            if (oscState.multiChannel) {
+                if (!oscState.multiFrames) oscState.multiFrames = [null, null, null, null];
+                let currentCh = oscState.activeChannels[oscState.currentMultiIdx];
+                oscState.multiFrames[currentCh] = frame;
+                oscState.currentMultiIdx = (oscState.currentMultiIdx + 1) % oscState.activeChannels.length;
+                if (oscState.running && oscState.triggerMode !== 'single') {
+                    restartOsc();
+                } else if (oscState.triggerMode === 'single' && oscState.currentMultiIdx === 0) {
+                    oscState.singleCaptured = true;
+                }
+            } else {
+                oscState.currentFrame = frame;
+            }
         }
-        
-        oscState.currentFrame = frame;
 
         // Update actual rate based on frames received (optional, mostly for debugging)
         oscState.actualRateSamples += 1; // 1 frame
@@ -738,13 +833,44 @@
         }
 
         // --- Channel ---
-        const cfgOscChannel = document.getElementById('cfgOscChannel');
-        if (cfgOscChannel) {
-            cfgOscChannel.addEventListener('change', () => {
-                oscState.channel = parseInt(cfgOscChannel.value);
-                if (oscState.running) restartOsc();
-            });
+        const updateChannels = () => {
+            const chs = [];
+            for (let i = 0; i < 4; i++) {
+                if (document.getElementById('cfgOscCh' + i)?.checked) {
+                    chs.push(i);
+                }
+            }
+            if (chs.length === 0) {
+                let cb = document.getElementById('cfgOscCh0');
+                if (cb) cb.checked = true;
+                chs.push(0);
+            }
+            oscState.activeChannels = chs;
+            oscState.multiChannel = chs.length > 1;
+            oscState.currentMultiIdx = 0;
+            if (!oscState.multiChannel) {
+                oscState.channel = chs[0];
+            }
+            for (let i = 0; i < 4; i++) {
+                if (!chs.includes(i) && oscState.multiFrames) {
+                    oscState.multiFrames[i] = null;
+                }
+            }
+            
+            if (oscState.running) restartOsc();
+        };
+
+        for (let i = 0; i < 4; i++) {
+            const el = document.getElementById('cfgOscCh' + i);
+            if (el) el.addEventListener('change', updateChannels);
         }
+        updateChannels();
+
+        // --- Voltage Range ---
+        const cfgOscVoltRange = document.getElementById('cfgOscVoltRange');
+        oscState.divider = 21.0;
+        oscState.baseOffsetConfig = 33.0;
+        oscState.biasEnabled = true;
 
         // --- Sample Rate ---
         const cfgOscSampleRate = document.getElementById('cfgOscSampleRate');
@@ -753,6 +879,19 @@
                 oscState.sampleRateKHz = parseInt(cfgOscSampleRate.value) || 10;
                 if (oscState.running) restartOsc();
             });
+        }
+
+        // --- Resolution ---
+        const cfgOscResolution = document.getElementById('cfgOscResolution');
+        if (cfgOscResolution) {
+            cfgOscResolution.addEventListener('change', () => {
+                oscState.resolution = parseInt(cfgOscResolution.value) || 8;
+                oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
+                if (oscState.running) restartOsc();
+            });
+            // Initial setup
+            oscState.resolution = parseInt(cfgOscResolution.value) || 8;
+            oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
         }
 
         // --- Oversampling ---
@@ -782,8 +921,10 @@
         const btnOscResetTab = document.getElementById('btnOscResetTab');
 
         function updateOscZeroBadge() {
-            const hasOffset = Math.abs(oscState.zeroOffset) > 0.0001;
-            const txt = (oscState.zeroOffset >= 0 ? '+' : '') + oscState.zeroOffset.toFixed(3) + ' V';
+            if (!window.Calibration) return;
+            const offset = window.Calibration.zeroOffsets[oscState.channel] || 0.0;
+            const hasOffset = Math.abs(offset) > 0.0001;
+            const txt = (offset >= 0 ? '+' : '') + offset.toFixed(3) + ' V';
 
             if (oscZeroOffsetBadge && oscZeroOffsetVal) {
                 if (hasOffset) {
@@ -804,24 +945,24 @@
         }
 
         const doCalibOscZero = () => {
+            if (!window.Calibration) return;
             if (!oscState.currentFrame || oscState.currentFrame.length === 0) {
                 alert("Please Start Oscilloscope first to capture zero baseline.");
                 return;
             }
             let sum = 0;
             for (let i = 0; i < oscState.currentFrame.length; i++) {
-                sum += oscState.currentFrame[i] + (oscState.zeroOffset || 0);
+                sum += oscState.currentFrame[i];
             }
             const avg = sum / oscState.currentFrame.length;
-            oscState.zeroOffset = avg;
-            localStorage.setItem('microtester_osc_zero_offset', oscState.zeroOffset.toString());
+            window.Calibration.calibrateZero(oscState.channel, avg);
             updateOscZeroBadge();
         };
 
         const doResetOscZero = (e) => {
             if (e) { e.preventDefault(); e.stopPropagation(); }
-            oscState.zeroOffset = 0.0;
-            localStorage.removeItem('microtester_osc_zero_offset');
+            if (!window.Calibration) return;
+            window.Calibration.resetZero(oscState.channel);
             updateOscZeroBadge();
         };
 
@@ -829,6 +970,9 @@
         if (btnOscCalibTab) btnOscCalibTab.addEventListener('click', doCalibOscZero);
         if (btnOscResetZero) btnOscResetZero.addEventListener('click', doResetOscZero);
         if (btnOscResetTab) btnOscResetTab.addEventListener('click', doResetOscZero);
+
+        setInterval(updateOscZeroBadge, 1000);
+        updateOscZeroBadge();
 
         updateOscZeroBadge();
 
@@ -866,18 +1010,30 @@
             btnOscStartStop.classList.add('btn-danger');
         }
 
-        // Send command: [pin, oversample, rateKHz_lo, rateKHz_hi, trigEdge, trigLevel_lo, trigLevel_hi, trigMode, reqSamples_lo, reqSamples_hi]
-        const payload = new Uint8Array(10);
-        payload[0] = oscState.channel;
+        // Send command: [pin, oversample, rateKHz_lo, rateKHz_hi, trigEdge, trigLevel_lo, trigLevel_hi, trigMode, reqSamples_lo, reqSamples_hi, enableBias, bitness12]
+        if (oscState.multiChannel) {
+            oscState.currentMultiIdx = 0;
+            oscState.multiFrames = [null, null, null, null];
+        }
+        
+        let reqChannel = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
+        let reqRate = oscState.multiChannel ? Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) : oscState.sampleRateKHz;
+        
+        const payload = new Uint8Array(12);
+        payload[0] = reqChannel;
         payload[1] = oscState.oversample;
-        payload[2] = oscState.sampleRateKHz & 0xFF;
-        payload[3] = (oscState.sampleRateKHz >> 8) & 0xFF;
+        payload[2] = reqRate & 0xFF;
+        payload[3] = (reqRate >> 8) & 0xFF;
 
         payload[4] = oscState.triggerEdge === 'rising' ? 1 : 0;
 
         // Convert trigger voltage to raw ADC (0-255 for 8-bit mode)
-        let trigV = oscState.triggerLevel / oscState.divider;
-        if (oscState.biasEnabled) trigV += 1.65;
+        let trigV = oscState.triggerLevel;
+        if (oscState.baseOffsetConfig > 0) {
+            trigV = (trigV + oscState.baseOffsetConfig) / oscState.divider;
+        } else {
+            trigV = trigV / oscState.divider;
+        }
         let trigRaw = (trigV / oscState.vRef) * oscState.adcRes;
         trigRaw = Math.max(0, Math.min(oscState.adcRes, Math.round(trigRaw)));
 
@@ -889,13 +1045,19 @@
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
         const totalTime = oscState.timePerDiv * GRID_DIVISIONS_X;
-        const sampleRate = oscState.sampleRateKHz * 1000;
+        const maxRateKHz = oscState.resolution === 12 ? 2800 : 3818;
+        const actualRateKHz = Math.min(reqRate, maxRateKHz);
+        const sampleRate = actualRateKHz * 1000;
         let samplesOnScreen = Math.round(totalTime * sampleRate);
         if (samplesOnScreen < 20) samplesOnScreen = 20;
-        if (samplesOnScreen > 20000) samplesOnScreen = 20000; // MCU memory limit
+        
+        const maxSamples = oscState.resolution === 12 ? 10000 : 20000;
+        if (samplesOnScreen > maxSamples) samplesOnScreen = maxSamples; // MCU memory limit
 
         payload[8] = samplesOnScreen & 0xFF;
         payload[9] = (samplesOnScreen >> 8) & 0xFF;
+        payload[10] = oscState.biasEnabled ? 1 : 0;
+        payload[11] = oscState.resolution === 12 ? 1 : 0;
 
         microTester.sendCommand(CMD_OSC_START, payload);
 
@@ -925,18 +1087,31 @@
     function restartOsc() {
         if (!oscState.running) return;
         microTester.sendCommand(CMD_OSC_STOP);
+        
+        if (oscState.multiChannel) {
+            oscState.syncPending = true;
+            microTester.sendCommand(0x20); // CMD_GET_VREF as sync token
+        }
+        
         oscState.ringHead = 0;
         oscState.ringCount = 0;
 
-        const payload = new Uint8Array(10);
-        payload[0] = oscState.channel;
+        let reqChannel = oscState.multiChannel ? oscState.activeChannels[oscState.currentMultiIdx] : oscState.channel;
+        let reqRate = oscState.multiChannel ? Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) : oscState.sampleRateKHz;
+        
+        const payload = new Uint8Array(12);
+        payload[0] = reqChannel;
         payload[1] = oscState.oversample;
-        payload[2] = oscState.sampleRateKHz & 0xFF;
-        payload[3] = (oscState.sampleRateKHz >> 8) & 0xFF;
+        payload[2] = reqRate & 0xFF;
+        payload[3] = (reqRate >> 8) & 0xFF;
 
         payload[4] = oscState.triggerEdge === 'rising' ? 1 : 0;
-        let trigV = oscState.triggerLevel / oscState.divider;
-        if (oscState.biasEnabled) trigV += 1.65;
+        let trigV = oscState.triggerLevel;
+        if (oscState.baseOffsetConfig > 0) {
+            trigV = (trigV + oscState.baseOffsetConfig) / oscState.divider;
+        } else {
+            trigV = trigV / oscState.divider;
+        }
         let trigRaw = Math.max(0, Math.min(oscState.adcRes, Math.round((trigV / oscState.vRef) * oscState.adcRes)));
         payload[5] = trigRaw & 0xFF;
         payload[6] = (trigRaw >> 8) & 0xFF;
@@ -945,13 +1120,19 @@
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
         const totalTime = oscState.timePerDiv * GRID_DIVISIONS_X;
-        const sampleRate = oscState.sampleRateKHz * 1000;
+        const maxRateKHz = oscState.resolution === 12 ? 2800 : 3818;
+        const actualRateKHz = Math.min(reqRate, maxRateKHz);
+        const sampleRate = actualRateKHz * 1000;
         let samplesOnScreen = Math.round(totalTime * sampleRate);
         if (samplesOnScreen < 20) samplesOnScreen = 20;
-        if (samplesOnScreen > 20000) samplesOnScreen = 20000;
+        
+        const maxSamples = oscState.resolution === 12 ? 10000 : 20000;
+        if (samplesOnScreen > maxSamples) samplesOnScreen = maxSamples;
 
         payload[8] = samplesOnScreen & 0xFF;
         payload[9] = (samplesOnScreen >> 8) & 0xFF;
+        payload[10] = oscState.biasEnabled ? 1 : 0;
+        payload[11] = oscState.resolution === 12 ? 1 : 0;
 
         microTester.sendCommand(CMD_OSC_START, payload);
     }

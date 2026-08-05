@@ -53,12 +53,11 @@ static inline void delay_nops(uint32_t nops) {
 // Map Arduino Pins based on settings (Assuming STM32F401 BlackPill defaults)
 static int etsMapPin(uint8_t configPin) {
     switch(configPin) {
-        case 0: return PA0;
-        case 1: return PA1;
-        case 2: return PA2;
-        case 3: return PA3;
-        case 4: return PA4;
-        default: return PA4;
+        case 0: return PA1;
+        case 1: return PA2;
+        case 2: return PA3;
+        case 3: return PA4;
+        default: return PA1;
     }
 }
 
