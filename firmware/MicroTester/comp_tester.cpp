@@ -10,8 +10,8 @@
 #define P2_RH  PB15
 
 #define P3_ADC PA5
-#define P3_RL  PC13
-#define P3_RH  PC14
+#define P3_RL  PC14
+#define P3_RH  PC15
 
 struct ProbeDef {
     uint8_t adc_pin;
