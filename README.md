@@ -3,7 +3,7 @@
   <strong>Universal MCU-based Test Instrument Suite</strong>
 </p>
 
-> Turn your microcontroller into a multi-channel oscilloscope, voltmeter, signal generator, and component tester using modern Web technologies (HTML/JS) and STM32Duino.
+Turn your microcontroller into a multi-channel oscilloscope, voltmeter, signal generator, and component tester using Chromium based browser 
 
 ---
 
