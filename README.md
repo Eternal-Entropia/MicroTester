@@ -1,13 +1,44 @@
-# MicroTester
-MicroTester its Universal MCU-based test instrument suite. Based on HTML and stm32duino
+<p align="center">
+  <img src="logo.svg" alt="MicroTester Logo" width="320"><br>
+  <strong>Universal MCU-based Test Instrument Suite</strong>
+</p>
 
-MicroTester makes a microcontroller into an multichannel oscilloscope, voltmeter, signal generator and component tester.
+> Turn your microcontroller into a multi-channel oscilloscope, voltmeter, signal generator, and component tester using modern Web technologies (HTML/JS) and STM32Duino.
 
-now avaliable for STM32F401
+---
 
+## Features & Capabilities
 
+MicroTester transforms low-cost microcontrollers into a powerful desktop laboratory:
 
-releases:
+- **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
+- **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
+- **Signal Generator**: Programmable PWM signal generation and waveform outputs.
+- **Component Tester**: Automatic pinout detection and parameter measurement for:
+  - **Resistors**: 0.1 Ω .. 1 MΩ
+  - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
+  - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
+  - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
+  - **MOSFETs (N-Ch / P-Ch)**: $V_{th}$, Gate Capacitance ($C_g$), $R_{ds(on)}$, Pinout (G, D, S), and Body Diode $V_f$
+
+---
+
+## Supported Microcontrollers
+
+| MCU Model | Board | Specs | Status |
+| :--- | :--- | :--- | :--- |
+| **STM32F401** | Black Pill | 84MHz • 12-bit ADC | **Available Now** |
+| **STM32F103** | Blue Pill | 72MHz • 12-bit ADC | Coming Soon |
+| **RP2040** | Raspberry Pi Pico | 133MHz • 12-bit ADC | Coming Soon |
+| **ESP32-S3** | Dual Core | 240MHz • 12-bit ADC | Coming Soon |
+
+## Getting Started
+
+1. **Flash Firmware**: Compile and upload the firmware in `firmware/MicroTester` to your STM32F401 (Black Pill) using Arduino IDE / STM32Duino.
+2. **Launch Web UI**: Open `web/start.html` or `web/main.html` in your browser.
+3. **Connect**: Connect your MCU via Serial/WebUSB and start measuring!
+
+## Release History
 
 beta v1:beta support f401:voltmeter with oversampling, oscil with ETS, transisntor tester(R,C,diode, BJT), PWM generator
 
@@ -16,3 +47,4 @@ beta v2:added multi channel oscil. and fix +-30 volt auto polarity. added 3.8mhz
 beta v2.1: fix pinout for component tester
 
 beta v3: Added new calibration. fix bugs. added bugs. now component tester measures mosfet
+ETS work on aliasing signals.
