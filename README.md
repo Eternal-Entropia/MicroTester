@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="MicroTester Logo" width="400"><br>
+  <img src="logo.svg" alt="MicroTester Logo" width="300"><br>
   <strong>Universal MCU-based Instrument Suite</strong>
 </p>
 
