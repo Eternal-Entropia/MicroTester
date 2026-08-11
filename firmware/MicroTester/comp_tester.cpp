@@ -1,17 +1,31 @@
 #include "comp_tester.h"
 #include <math.h>
+#include "adc_sampler.h"
+#include <Adafruit_TinyUSB.h>
+
+static float vdda_mv = 3300.0f;
+static uint16_t g_RL[3] = {6800, 6800, 6800};       // in 0.1 ohm units
+static uint32_t g_RH[3] = {470000, 470000, 470000}; // in 1 ohm units
+
+void comp_tester_set_cal(uint16_t vdda, const uint16_t rl[3], const uint32_t rh[3]) {
+    if (vdda >= 2500 && vdda <= 4000) vdda_mv = (float)vdda;
+    for (int i = 0; i < 3; i++) {
+        if (rl && rl[i] >= 3000 && rl[i] <= 10000) g_RL[i] = rl[i];
+        if (rh && rh[i] >= 100000 && rh[i] <= 1000000) g_RH[i] = rh[i];
+    }
+}
 
 #define P1_ADC PA7
-#define P1_RL  PB12
-#define P1_RH  PB13
+#define P1_RL  PB10
+#define P1_RH  PB1
 
 #define P2_ADC PA6
-#define P2_RL  PB14
-#define P2_RH  PB15
+#define P2_RL  PB12
+#define P2_RH  PB13
 
 #define P3_ADC PA5
-#define P3_RL  PC14
-#define P3_RH  PC15
+#define P3_RL  PB14
+#define P3_RH  PB15
 
 struct ProbeDef {
     uint8_t adc_pin;
@@ -59,8 +73,11 @@ const uint8_t perms[6][3] = {
 static ScanData scan_results[6];
 
 static void discharge_probes_completely(uint8_t probeA, uint8_t probeB);
-static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16_t *out_vbe);
+static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16_t *out_vbe, uint16_t *out_iceo = NULL);
 static bool measure_capacitor(uint8_t probeA, uint8_t probeB);
+static uint16_t measure_rdson(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
+static uint16_t measure_vth(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
+static bool test_mosfet_channel(uint8_t g, uint8_t d, uint8_t s, bool is_nch, uint16_t* out_vth, uint16_t* out_rds);
 
 static void set_probe_hiz(uint8_t p) {
     pinMode(probes[p].rl_pin, INPUT);
@@ -108,6 +125,12 @@ void comp_tester_init() {
 }
 
 void comp_tester_start(uint8_t mode) {
+    adc_sampler_stop();
+    uint16_t vref_raw = adc_sampler_measure_vrefint();
+    if (vref_raw > 0) {
+        vdda_mv = 1210.0f * 4096.0f / (float)vref_raw;
+    }
+    
     tester_mode = mode;
     state = STATE_DISCHARGE;
     state_timer = millis();
@@ -147,54 +170,67 @@ static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16
     if (!is_pnp) {
         set_probe_rl_vcc(c);
         set_probe_rl_gnd(e);
-        set_probe_rh_vcc(b);
     } else {
         set_probe_rl_gnd(c);
         set_probe_rl_vcc(e);
-        set_probe_rh_gnd(b);
     }
     
-    delay(5); // Wait for current to stabilize
+    // Step 1: Measure Leakage with Base OPEN
+    set_probe_hiz(b);
+    delay(5);
+    
+    uint32_t iceo_sum = 0;
+    uint32_t t_start = millis();
+    uint32_t samples = 0;
+    while (millis() - t_start < 20) { // 20ms average for noise reduction
+        iceo_sum += analogRead(is_pnp ? probes[c].adc_pin : probes[e].adc_pin);
+        samples++;
+    }
+    uint8_t sensor_probe = is_pnp ? c : e;
+    uint16_t v_leak_gnd = (samples > 0) ? (iceo_sum / samples) : read_adc_avg(probes[sensor_probe].adc_pin);
+    if (out_iceo) {
+        uint32_t rl_sensor = g_RL[sensor_probe] / 10;
+        if (rl_sensor == 0) rl_sensor = 680;
+        *out_iceo = (v_leak_gnd * (uint32_t)(vdda_mv * 1000) / 4096) / rl_sensor; // uA
+    }
+    uint16_t v_c_leak = read_adc_avg(probes[c].adc_pin);
+    
+    // Step 2: Drive Base and measure active parameters
+    if (!is_pnp) {
+        set_probe_rh_vcc(b);
+    } else {
+        set_probe_rh_gnd(b);
+    }
+    delay(5);
     
     uint16_t v_c = read_adc_avg(probes[c].adc_pin);
     uint16_t v_b = read_adc_avg(probes[b].adc_pin);
     uint16_t v_e = read_adc_avg(probes[e].adc_pin);
     
     uint32_t hfe = 0;
+    uint32_t rl_c = g_RL[c] / 10;
+    if (rl_c == 0) rl_c = 680;
+    uint32_t rh_b = g_RH[b];
+    if (rh_b == 0) rh_b = 470000;
     
     if (!is_pnp) {
         if (v_b < 4096 && v_c < 4096) {
             uint32_t drop_c = 4096 - v_c;
+            uint32_t drop_c_leak = (v_c_leak < 4096) ? (4096 - v_c_leak) : 0;
+            uint32_t drop_c_active = (drop_c > drop_c_leak) ? (drop_c - drop_c_leak) : 0;
             uint32_t drop_b = 4096 - v_b;
             if (drop_b > 0) {
-                hfe = (drop_c * 691) / drop_b; // 691 is 470000 / 680
+                hfe = (uint32_t)(((uint64_t)drop_c_active * rh_b) / ((uint64_t)drop_b * rl_c));
             }
         }
-        if (out_vbe) *out_vbe = (v_b > v_e) ? ((uint32_t)(v_b - v_e) * 3300 / 4096) : 0;
+        if (out_vbe) *out_vbe = (v_b > v_e) ? ((uint32_t)(v_b - v_e) * (uint32_t)vdda_mv / 4096) : 0;
     } else {
-        if (v_b > 0) {
-            hfe = ((uint32_t)v_c * 691) / v_b;
+        uint32_t drop_b_pnp = 4096 - v_b;
+        if (drop_b_pnp > 0) {
+            uint32_t v_c_active = (v_c > v_c_leak) ? (v_c - v_c_leak) : 0;
+            hfe = (uint32_t)(((uint64_t)v_c_active * rh_b) / ((uint64_t)drop_b_pnp * rl_c));
         }
-        if (out_vbe) *out_vbe = (v_e > v_b) ? ((uint32_t)(v_e - v_b) * 3300 / 4096) : 0;
-    }
-    
-    if (out_iceo) {
-        set_probe_hiz(b); // Open base for Iceo
-        delay(5);
-        
-        uint32_t iceo_sum = 0;
-        uint32_t t_start = millis();
-        uint32_t samples = 0;
-        while (millis() - t_start < 20) { // 20ms average to cancel 50Hz noise
-            iceo_sum += analogRead(is_pnp ? probes[c].adc_pin : probes[e].adc_pin);
-            samples++;
-        }
-        if (samples > 0) {
-            uint16_t v_adc = iceo_sum / samples;
-            *out_iceo = (v_adc * 3300000 / 4096) / 680; // uA
-        } else {
-            *out_iceo = 0;
-        }
+        if (out_vbe) *out_vbe = (v_e > v_b) ? ((uint32_t)(v_e - v_b) * (uint32_t)vdda_mv / 4096) : 0;
     }
     
     set_probe_hiz(0);
@@ -202,6 +238,123 @@ static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16
     set_probe_hiz(2);
     
     return hfe;
+}
+
+static uint16_t measure_rdson(uint8_t g, uint8_t d, uint8_t s, bool is_nch) {
+    discharge_probes_completely(g, d);
+    
+    // Set up Source directly to GND (N-Ch) or VCC (P-Ch) for full 3.3V Vgs drive!
+    if (is_nch) {
+        set_probe_rl_vcc(d);   // Drain connected to VCC via RL
+        set_probe_rl_vcc(g);   // Gate driven hard to VCC (3.3V)
+        pinMode(probes[s].adc_pin, OUTPUT);
+        digitalWrite(probes[s].adc_pin, LOW); // Direct 0-ohm Source GND drive
+    } else {
+        set_probe_rl_gnd(d);   // Drain connected to GND via RL
+        set_probe_rl_gnd(g);   // Gate driven hard to GND (0V)
+        pinMode(probes[s].adc_pin, OUTPUT);
+        digitalWrite(probes[s].adc_pin, HIGH); // Direct 0-ohm Source VCC drive
+    }
+    delay(5);
+    
+    uint16_t vd = read_adc_avg(probes[d].adc_pin);
+    uint16_t vs = read_adc_avg(probes[s].adc_pin);
+    
+    // Release pins safely
+    set_probe_hiz(g); set_probe_hiz(d); set_probe_hiz(s);
+    
+    uint32_t rl_ohm = g_RL[d] / 10;
+    if (rl_ohm == 0) rl_ohm = 680;
+    
+    uint32_t rds_mohm = 0;
+    if (is_nch) {
+        uint32_t drop_rl = (4095 > vd) ? (4095 - vd) : 1;
+        if (drop_rl < 15) return 0xFFFF; // Channel did not open
+        uint32_t vds_adc = (vd > vs) ? (vd - vs) : 0;
+        rds_mohm = (uint32_t)((vds_adc * rl_ohm * 1000UL) / drop_rl);
+    } else {
+        uint32_t drop_rl = vd;
+        if (drop_rl < 15) return 0xFFFF; // Channel did not open
+        uint32_t vds_adc = (vs > vd) ? (vs - vd) : 0;
+        rds_mohm = (uint32_t)((vds_adc * rl_ohm * 1000UL) / drop_rl);
+    }
+    
+    if (rds_mohm >= 60000) return 0xFFFF;
+    return (uint16_t)rds_mohm;
+}
+
+static uint16_t measure_vth(uint8_t g, uint8_t d, uint8_t s, bool is_nch) {
+    discharge_probes_completely(g, s);
+    
+    if (is_nch) {
+        set_probe_rl_vcc(d);
+        set_probe_rl_gnd(s);
+        set_probe_rh_vcc(g);    // Gate charged through RH 470k
+    } else {
+        set_probe_rl_gnd(d);
+        set_probe_rl_vcc(s);
+        set_probe_rh_gnd(g);
+    }
+    
+    uint32_t t0 = millis();
+    uint16_t vth_ticks = 0;
+    
+    while (millis() - t0 < 30) {
+        uint16_t vd = analogRead(probes[d].adc_pin);
+        bool threshold_crossed;
+        if (is_nch) threshold_crossed = (vd < 3000);  // Conduction opens channel
+        else        threshold_crossed = (vd > 1000);
+        if (threshold_crossed) {
+            uint16_t vg = analogRead(probes[g].adc_pin);
+            vth_ticks = vg;
+            break;
+        }
+        delayMicroseconds(100);
+    }
+    
+    discharge_probes_completely(g, s);
+    if (vth_ticks == 0) return 0;
+    
+    uint16_t mv = (uint16_t)(((uint32_t)vth_ticks * (uint32_t)vdda_mv) / 4096);
+    if (is_nch) return mv;
+    return (vdda_mv > mv) ? (uint16_t)(vdda_mv - mv) : 0;
+}
+
+static bool test_mosfet_channel(uint8_t g, uint8_t d, uint8_t s, bool is_nch,
+                                uint16_t* out_vth, uint16_t* out_rds) {
+    discharge_probes_completely(g, s);
+    
+    // Step A: Check channel is OFF at Vgs = 0
+    if (is_nch) {
+        set_probe_rl_vcc(d);
+        set_probe_rl_gnd(s);
+        set_probe_rl_gnd(g);    // Vgs = 0
+    } else {
+        set_probe_rl_gnd(d);
+        set_probe_rl_vcc(s);
+        set_probe_rl_vcc(g);
+    }
+    delay(5);
+    uint16_t v_d_zero = read_adc_avg(probes[d].adc_pin);
+    
+    // Step B: Turn ON channel via Gate drive (using RL for strong drive on power MOSFETs)
+    if (is_nch) set_probe_rl_vcc(g);  // Gate to VCC
+    else        set_probe_rl_gnd(g);  // Gate to GND
+    delay(10);
+    
+    uint16_t v_d_open = read_adc_avg(probes[d].adc_pin);
+    set_probe_hiz(g);
+    
+    bool opened_by_gate;
+    if (is_nch) opened_by_gate = (v_d_zero > 2200) && (v_d_open < v_d_zero - 500);
+    else        opened_by_gate = (v_d_zero < 1800) && (v_d_open > v_d_zero + 500);
+    
+    if (!opened_by_gate) return false;
+    
+    *out_rds = measure_rdson(g, d, s, is_nch);
+    *out_vth = measure_vth(g, d, s, is_nch);
+    
+    return true;
 }
 
 static void analyze_data() {
@@ -229,18 +382,118 @@ static void analyze_data() {
     }
     
     // ============ STEP 1: Check for SHORT (< 0.5 Ohm) ============
+    // Check if it's a 3-way short (calibration mode)
+    uint16_t diff01 = (GET_V(0, 0, false) > GET_V(0, 1, false)) ? (GET_V(0, 0, false) - GET_V(0, 1, false)) : (GET_V(0, 1, false) - GET_V(0, 0, false));
+    uint16_t diff02 = (GET_V(1, 0, false) > GET_V(1, 2, false)) ? (GET_V(1, 0, false) - GET_V(1, 2, false)) : (GET_V(1, 2, false) - GET_V(1, 0, false));
+    uint16_t diff12 = (GET_V(3, 1, false) > GET_V(3, 2, false)) ? (GET_V(3, 1, false) - GET_V(3, 2, false)) : (GET_V(3, 2, false) - GET_V(3, 1, false));
+
+    if (GET_V(0, 0, false) > 500 && GET_V(1, 0, false) > 500 && GET_V(3, 1, false) > 500 && 
+        diff01 < 15 && diff02 < 15 && diff12 < 15) {
+        
+        // It's a 3-way short! Perform highly precise, slow calibration.
+        uint32_t vV_01_rl = 0, vG_01_rl = 0, vV_02_rl = 0, vG_02_rl = 0, vV_12_rl = 0, vG_12_rl = 0;
+        uint32_t vV_01_rh = 0, vG_01_rh = 0, vV_02_rh = 0, vG_02_rh = 0;
+
+        for (int step = 0; step < 5; step++) {
+            uint8_t pV = (step == 0 || step == 3) ? 0 : ((step == 2) ? 1 : 0);
+            uint8_t pG = (step == 0 || step == 3) ? 1 : ((step == 2) ? 2 : 2);
+            bool use_rh = (step >= 3);
+            
+            // 1. Discharge everything to ground
+            set_probe_rl_gnd(0); set_probe_rl_gnd(1); set_probe_rl_gnd(2);
+            delay(use_rh ? 60 : 20);
+            
+            // 2. Set HiZ
+            set_probe_hiz(0); set_probe_hiz(1); set_probe_hiz(2);
+            
+            // 3. Apply test voltage
+            if (use_rh) {
+                set_probe_rh_vcc(pV);
+                set_probe_rh_gnd(pG);
+            } else {
+                set_probe_rl_vcc(pV);
+                set_probe_rl_gnd(pG);
+            }
+            
+            // 4. Wait for RC settling (very long for 470k)
+            delay(use_rh ? 120 : 25);
+            
+            // 5. Average 65536 samples for extreme precision
+            uint32_t sumV = 0, sumG = 0;
+            for (int i = 0; i < 65536; i++) {
+                sumV += analogRead(probes[pV].adc_pin);
+                sumG += analogRead(probes[pG].adc_pin);
+            }
+            
+            uint32_t valV = sumV / 65536;
+            uint32_t valG = sumG / 65536;
+            
+            if (step == 0) { vV_01_rl = valV; vG_01_rl = valG; }
+            else if (step == 1) { vV_02_rl = valV; vG_02_rl = valG; }
+            else if (step == 2) { vV_12_rl = valV; vG_12_rl = valG; }
+            else if (step == 3) { vV_01_rh = valV; vG_01_rh = valG; }
+            else if (step == 4) { vV_02_rh = valV; vG_02_rh = valG; }
+        }
+        
+        // Ensure probes are left safely off
+        set_probe_hiz(0); set_probe_hiz(1); set_probe_hiz(2);
+        
+        uint32_t V01 = (vV_01_rl + vG_01_rl) / 2;
+        uint32_t V02 = (vV_02_rl + vG_02_rl) / 2;
+        
+        // R_L0 is anchor (680 ohms nominal)
+        uint32_t R_L0 = 6800; // in 0.1 ohm units
+        uint32_t R_L1 = (V01 * 6800) / (4096 - V01);
+        uint32_t R_L2 = (V02 * 6800) / (4096 - V02);
+        
+        // 470k check
+        uint32_t VH01 = (vV_01_rh + vG_01_rh) / 2;
+        uint32_t VH02 = (vV_02_rh + vG_02_rh) / 2;
+        
+        uint32_t R_H0 = 47000; // in 10 ohm units (470k)
+        uint32_t R_H1 = (VH01 * 47000) / (4096 - VH01);
+        uint32_t R_H2 = (VH02 * 47000) / (4096 - VH02);
+        
+        uint32_t diff01_cal = (vV_01_rl > vG_01_rl) ? (vV_01_rl - vG_01_rl) : (vG_01_rl - vV_01_rl);
+        uint32_t diff02_cal = (vV_02_rl > vG_02_rl) ? (vV_02_rl - vG_02_rl) : (vG_02_rl - vV_02_rl);
+        uint32_t diff12_cal = (vV_12_rl > vG_12_rl) ? (vV_12_rl - vG_12_rl) : (vG_12_rl - vV_12_rl);
+        uint32_t avg_diff = (diff01_cal + diff02_cal + diff12_cal) / 3;
+        uint32_t wire_r100 = 68000UL * avg_diff / V01; // in 0.01 ohm units
+        
+        final_result.type = COMP_SHORT;
+        final_result.pinA = 0; final_result.pinB = 1; final_result.pinC = 255; // 255 flags 3-way calib
+        final_result.value1 = (R_L0 & 0xFFFF) | ((R_L1 & 0xFFFF) << 16);
+        final_result.value2 = (R_L2 & 0xFFFF) | ((wire_r100 & 0xFFFF) << 16);
+        final_result.value3 = (R_H1 & 0xFFFF) | ((R_H2 & 0xFFFF) << 16);
+        return;
+    }
+
     for (int i = 0; i < 6; i++) {
         uint8_t pV = perms[i][0]; // VCC probe
         uint8_t pG = perms[i][1]; // GND probe
         uint16_t vV = GET_V(i, pV, false);
         uint16_t vG = GET_V(i, pG, false);
         
-        // Short: both probes nearly equal voltage
-        if (vV > 500 && vG > 500 && (vV > vG ? (vV - vG) : (vG - vV)) < 15) {
+        // Find reverse direction permutation (swap pV and pG)
+        int rev_i = -1;
+        for (int r = 0; r < 6; r++) {
+            if (perms[r][0] == pG && perms[r][1] == pV) { rev_i = r; break; }
+        }
+        uint16_t rev_vV = (rev_i >= 0) ? GET_V(rev_i, pG, false) : 0;
+        uint16_t rev_vG = (rev_i >= 0) ? GET_V(rev_i, pV, false) : 0;
+
+        uint32_t diff_fwd = (vV > vG) ? (vV - vG) : (vG - vV);
+        uint32_t diff_rev = (rev_vV > rev_vG) ? (rev_vV - rev_vG) : (rev_vG - rev_vV);
+
+        // Real Short Circuit MUST conduct symmetrically in BOTH forward and reverse directions!
+        if (vV > 500 && vG > 500 && diff_fwd < 15 && rev_vV > 500 && rev_vG > 500 && diff_rev < 15) {
+            uint32_t diff = (diff_fwd + diff_rev) / 2;
+            uint32_t R100 = (uint32_t)68000UL * diff / vG; // 0.01 ohm units
             final_result.type = COMP_SHORT;
             final_result.pinA = pV;
             final_result.pinB = pG;
             final_result.pinC = 3 - (pV + pG);
+            final_result.value1 = R100;
             return;
         }
     }
@@ -252,7 +505,7 @@ static void analyze_data() {
         uint16_t vG_rl = GET_V(i, pG, false); // R_low
         uint16_t vG_rh = GET_V(i, pG, true);  // R_high
         
-        if (vG_rl > 80 || vG_rh > 120) {
+        if (vG_rl > 150 || vG_rh > 250) {
             current_found = true;
             break;
         }
@@ -283,11 +536,15 @@ static void analyze_data() {
         
         if (vG_rl > 20 && vG_rl < 4050 && vV_rl > vG_rl) {
             uint32_t diff = vV_rl - vG_rl;
-            R = (uint32_t)680UL * diff / vG_rl;
+            uint32_t rl_sum = (g_RL[pV] + g_RL[pG]) / 20; // in Ohms
+            if (rl_sum == 0) rl_sum = 680;
+            R = (uint32_t)rl_sum * diff / vG_rl;
             valid_r = true;
-        } else if (vG_rh > 15 && vG_rh < 4050 && vV_rh > vG_rh) {
+        } else if (vG_rh > 80 && vG_rh < 4050 && vV_rh > vG_rh) {
             uint32_t diff = vV_rh - vG_rh;
-            R = (uint32_t)470000UL * diff / vG_rh;
+            uint32_t rh_sum = (g_RH[pV] + g_RH[pG]) / 2; // in Ohms
+            if (rh_sum == 0) rh_sum = 470000;
+            R = (uint32_t)rh_sum * diff / vG_rh;
             valid_r = true;
         }
         
@@ -392,7 +649,7 @@ static void analyze_data() {
         
         if (vG > 100) {
             uint16_t vf_adc = (vV > vG) ? (vV - vG) : 0;
-            uint16_t vf_mv = (uint32_t)vf_adc * 3300 / 4096;
+            uint16_t vf_mv = (uint32_t)vf_adc * (uint32_t)vdda_mv / 4096;
             
             // Find reverse permutation
             int rev_idx = -1;
@@ -458,15 +715,17 @@ static void analyze_data() {
                     collector = pin2; emitter = pin1; hfe = hfe2; vbe = vbe2; iceo = iceo2;
                 }
                 
-                final_result.type = COMP_BJT;
-                final_result.pinA = b;          // Base
-                final_result.pinB = collector;  // Collector
-                final_result.pinC = emitter;    // Emitter
-                final_result.value1 = (hfe > 0) ? hfe : 1;
-                final_result.value2 = vbe;
-                if (iceo > 4095) iceo = 4095;
-                final_result.flags = FLAG_NPN | (iceo << 4);
-                return;
+                if (hfe >= 10) {
+                    final_result.type = COMP_BJT;
+                    final_result.pinA = b;          // Base
+                    final_result.pinB = collector;  // Collector
+                    final_result.pinC = emitter;    // Emitter
+                    final_result.value1 = hfe;
+                    final_result.value2 = vbe;
+                    if (iceo > 4095) iceo = 4095;
+                    final_result.flags = FLAG_NPN | (iceo << 4);
+                    return;
+                }
             }
             
             if (pnp_junctions == 2) {
@@ -488,14 +747,61 @@ static void analyze_data() {
                     collector = pin2; emitter = pin1; hfe = hfe2; vbe = vbe2; iceo = iceo2;
                 }
                 
-                final_result.type = COMP_BJT;
-                final_result.pinA = b;
-                final_result.pinB = collector;
-                final_result.pinC = emitter;
-                final_result.value1 = (hfe > 0) ? hfe : 1;
-                final_result.value2 = vbe;
-                if (iceo > 4095) iceo = 4095;
-                final_result.flags = FLAG_PNP | (iceo << 4);
+                if (hfe >= 10) {
+                    final_result.type = COMP_BJT;
+                    final_result.pinA = b;
+                    final_result.pinB = collector;
+                    final_result.pinC = emitter;
+                    final_result.value1 = hfe;
+                    final_result.value2 = vbe;
+                    if (iceo > 4095) iceo = 4095;
+                    final_result.flags = FLAG_PNP | (iceo << 4);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ============ STEP 5.5: MOSFET Detection (Enhancement Mode) ============
+    if (diode_count >= 1 && diode_count <= 2) {
+        for (int dIdx = 0; dIdx < diode_count; dIdx++) {
+            uint8_t pinA = diodes[dIdx].anode;
+            uint8_t pinK = diodes[dIdx].cathode;
+            uint8_t pin3 = 3 - pinA - pinK;
+            
+            // Candidate Gate pin3 MUST NOT form any PN junction diodes
+            bool g_in_any_diode = false;
+            for (int j = 0; j < diode_count; j++) {
+                if (diodes[j].anode == pin3 || diodes[j].cathode == pin3) {
+                    g_in_any_diode = true;
+                    break;
+                }
+            }
+            if (g_in_any_diode) continue;
+            
+            uint16_t vth_mv = 0, rds_mohm = 0;
+            
+            // 1. Test N-channel enhancement (D = pinK, S = pinA, G = pin3)
+            if (test_mosfet_channel(pin3, pinK, pinA, true, &vth_mv, &rds_mohm)) {
+                final_result.type = COMP_MOSFET;
+                final_result.pinA = pin3;   // Gate
+                final_result.pinB = pinK;   // Drain
+                final_result.pinC = pinA;   // Source
+                final_result.value1 = vth_mv;
+                final_result.value2 = rds_mohm;
+                final_result.flags = FLAG_NCH | FLAG_ENHANCEMENT;
+                return;
+            }
+            
+            // 2. Test P-channel enhancement (D = pinA, S = pinK, G = pin3)
+            if (test_mosfet_channel(pin3, pinA, pinK, false, &vth_mv, &rds_mohm)) {
+                final_result.type = COMP_MOSFET;
+                final_result.pinA = pin3;   // Gate
+                final_result.pinB = pinA;   // Drain
+                final_result.pinC = pinK;   // Source
+                final_result.value1 = vth_mv;
+                final_result.value2 = rds_mohm;
+                final_result.flags = FLAG_PCH | FLAG_ENHANCEMENT;
                 return;
             }
         }
@@ -521,6 +827,9 @@ static void discharge_probes_completely(uint8_t probeA, uint8_t probeB) {
     
     uint32_t t_start = millis();
     while (millis() - t_start < 20000) { // 20 seconds max active discharge
+#if defined(ARDUINO_ARCH_STM32)
+        TinyUSB_Device_Task();
+#endif
         uint16_t vA = analogRead(probes[probeA].adc_pin);
         uint16_t vB = analogRead(probes[probeB].adc_pin);
         
@@ -636,12 +945,16 @@ static uint16_t measure_esr(uint8_t probeA, uint8_t probeB) {
     
     if (v_esr_drop < 0.0f) v_esr_drop = 0.0f;
     
-    // The current is determined by the pull-up resistor.
-    // vA_pos is the voltage at the test point A (approx 1.65V).
-    float v_resistor = 4095.0f - vA_pos;
-    
-    if (v_resistor > 0.0f && v_esr_drop > 0.0f) {
-        float esr = (v_esr_drop / v_resistor) * 680.0f;
+    // The current is determined by the pull-up and pull-down resistors.
+    // v_mid is the voltage at the midpoint (in ADC ticks, around 2048).
+    // Since the capacitor is in series with the 680 ohm ground resistor,
+    // the voltage across the ground resistor is exactly v_mid.
+    float v_mid = (vA_pos + vB_pos) / 2.0f;
+        
+    if (v_mid > 0.0f && v_esr_drop > 0.0f) {
+        float rl_b = (g_RL[probeB] > 0) ? ((float)g_RL[probeB] / 10.0f) : 680.0f;
+        float esr = (v_esr_drop / v_mid) * rl_b;
+        esr -= 0.05f;
         uint32_t r_esr_x100 = (uint32_t)(esr * 100.0f);
         if (r_esr_x100 > 65000) r_esr_x100 = 65000;
         return (uint16_t)r_esr_x100;
@@ -708,8 +1021,8 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
             // Constant = 10.4pF * 4095 * 10 = ~425000
             uint32_t c_pf_x10 = (425000UL / v_share) - (425000UL / v_zero);
             
-            // Allow reporting up to ~1500pF in this mode, since Range 1 starts around 25pF.
-            if (c_pf_x10 > 2 && c_pf_x10 < 15000) { 
+            // Allow reporting up to ~8000pF in this mode (covers power MOSFET Cg).
+            if (c_pf_x10 > 2 && c_pf_x10 < 80000) { 
                 final_result.type = COMP_CAPACITOR;
                 final_result.pinA = probeA;
                 final_result.pinB = probeB;
@@ -761,8 +1074,9 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
 
         if (r1_ok && elapsed >= 15) {
             // C = t / R_high
-            // C (pF) = elapsed_us * 10^6 / 470,000 = elapsed_us * 2.128
-            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 2128 / 1000);
+            uint32_t rh_val = g_RH[probeA];
+            if (rh_val == 0) rh_val = 470000;
+            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 1000000000ULL / (uint64_t)rh_val);
             
             // Subtract basic stray capacitance of probes/ADC
             if (c_pf > 25) c_pf -= 25; else c_pf = 0;
@@ -799,7 +1113,7 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
     // 1/e = 0.367879. This perfectly compensates for internal P-FET/N-FET asymmetry!
     uint16_t threshold_large = 4095 - (uint16_t)((4095.0f - v_start) * 0.367879f);
 
-    if (v_start < threshold_large) {
+    if (v_start < 300 && v_start < threshold_large) {
         uint32_t t_start = micros();
         uint32_t timeout_us = 2500000; // 2.5 seconds max (up to ~1800 uF)
         bool r2_ok = false;
@@ -824,17 +1138,20 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
 
         if (r2_ok && elapsed > 20) {
             // C = t / R_total
-            // Due to electrolytic leakage and exact pin characteristics, an empirical 
-            // multiplier of 6700 (instead of theoretical 7042) aligns this perfectly 
-            // with industry-standard component testers.
-            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 6700 / 10);
+            uint32_t rl_sum = (g_RL[probeA] + g_RL[probeB]) / 10;
+            if (rl_sum == 0) rl_sum = 1360;
+            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 913242ULL / (uint64_t)rl_sum);
 
             final_result.type = COMP_CAPACITOR;
             final_result.pinA = probeA;
             final_result.pinB = probeB;
             final_result.pinC = 3 - (probeA + probeB);
             final_result.value1 = c_pf; // pF
-            final_result.value2 = measure_esr(probeA, probeB); // Keep existing ESR logic
+            if (final_result.value1 >= 1000000) { // >= 1 uF only
+                final_result.value2 = measure_esr(probeA, probeB); 
+            } else {
+                final_result.value2 = 0;
+            }
             discharge_probes_completely(probeA, probeB);
             return true;
         }
@@ -993,6 +1310,45 @@ void comp_tester_loop() {
                     final_result.value2 = cap_val; 
                 } else {
                     // Failed to measure (e.g. timeout due to leakage), restore original
+                    final_result = original_result;
+                }
+                
+                tester_mode = old_mode;
+            } else if (final_result.type == COMP_BJT) {
+                CompResult original_result = final_result;
+                uint8_t old_mode = tester_mode;
+                tester_mode = 1; // Only use fast charge for tiny parasitic capacitance
+                
+                uint8_t probeA, probeB;
+                if (original_result.flags & FLAG_NPN) {
+                    probeA = original_result.pinB; // Collector to VCC
+                    probeB = original_result.pinA; // Base to GND
+                } else {
+                    probeA = original_result.pinA; // Base to VCC
+                    probeB = original_result.pinB; // Collector to GND
+                }
+                
+                if (measure_capacitor(probeA, probeB)) {
+                    uint32_t cap_val = final_result.value1;
+                    final_result = original_result;
+                    // Store Vbe in lower 16 bits, Capacitance in upper 16 bits
+                    final_result.value2 = (original_result.value2 & 0xFFFF) | (cap_val << 16);
+                } else {
+                    final_result = original_result;
+                }
+                
+                tester_mode = old_mode;
+            } else if (final_result.type == COMP_MOSFET) {
+                CompResult original_result = final_result;
+                uint8_t old_mode = tester_mode;
+                tester_mode = 1; // Range 0 fast charge sharing mode for parasitic Cg
+                
+                // Measure Gate-to-Source capacitance Cg (pinA = Gate, pinC = Source)
+                if (measure_capacitor(original_result.pinA, original_result.pinC)) {
+                    uint32_t c_g = final_result.value1;
+                    final_result = original_result;
+                    final_result.value3 = c_g;
+                } else {
                     final_result = original_result;
                 }
                 

@@ -6,7 +6,7 @@ window.voltConfig = {
     running: false,
     zeroOffset: parseFloat(localStorage.getItem('microtester_volt_zero_offset')) || 0.0,
     gainRatio: 11.0,      // Vin = Vadc * 11.0 (100k / 10k Divider, PB9 Hi-Z)
-    baseOffset: 0.0,      // No bias offset in voltmeter mode
+
     vRef: 3.3,
     adcRes: 4096,       // 12-bit ADC
     mode: 'dc',         // 'dc' or 'ac'
@@ -112,9 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (voltDivRatioInfo) voltDivRatioInfo.innerText = gainRatio.toFixed(1) + 'x';
 
         // Apply configuration
-        voltConfig.gainRatio = gainRatio;
-        voltConfig.baseOffset = baseOffset;
-        voltConfig.biasEnabled = biasEnabled;
+        voltConfig.divider = 1.0;    voltConfig.biasEnabled = biasEnabled;
         voltConfig.autoPolarity = autoPolarity;
     }
 
@@ -140,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         voltConfig.channel = pin;
         applySelectedRange();
 
-        const biasMode = (voltConfig.biasEnabled || voltConfig.baseOffset > 0) ? 1 : 0;
+        const biasMode = voltConfig.biasEnabled ? 1 : 0;
         microTester.sendCommand(CMD_VOLT_STOP);
         microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
     }
@@ -167,6 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnStartStop) {
         btnStartStop.addEventListener('click', () => {
             if (!microTester.device) return alert("Connect USB first!");
+            if (window.Calibration && window.Calibration._calibrationBusy) return alert("Calibration is currently in progress. Please wait until finished.");
 
             if (voltConfig.running) {
                 // Stop
@@ -182,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const oversample = parseInt(document.getElementById('cfgVoltOversampling').value);
 
                 applySelectedRange();
-                const biasMode = (voltConfig.biasEnabled || voltConfig.baseOffset > 0) ? 1 : 0;
+                const biasMode = voltConfig.biasEnabled ? 1 : 0;
 
                 voltConfig.running = true;
                 btnStartStop.innerHTML = '■ Stop';
@@ -283,8 +282,12 @@ function processVoltmeterData(payload) {
 
     // Helper to convert raw ADC reading to Vin input voltage
     function rawToVin(raw) {
-        if (!window.Calibration) return 0;
-        let vin = window.Calibration.calculateVolts(voltConfig.channel, raw, 12, voltConfig.gainRatio, voltConfig.baseOffset, 0);
+        let vin = raw;
+        if (window.Calibration) {
+            vin = window.Calibration.calculateVolts(voltConfig.biasEnabled, voltConfig.channel, raw, 12, voltConfig.gainRatio);
+        } else {
+            vin = raw; // Fallback
+        }
         if (Math.abs(vin) < 0.05) vin = 0.0;
         return vin;
     }
@@ -324,7 +327,6 @@ function processVoltmeterData(payload) {
         // Floating probes will pick up positive noise (maxRaw > 5) and won't trigger this.
         if (!voltConfig.biasEnabled && maxRaw <= 2) {
             voltConfig.biasEnabled = true;
-            voltConfig.baseOffset = 33.0;
             voltConfig.gainRatio = 21.0;
             if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([1]));
         } 
@@ -332,7 +334,6 @@ function processVoltmeterData(payload) {
         // Turn OFF if avgRaw >= 2000 (meaning it's floating or positive).
         else if (voltConfig.biasEnabled && avgRaw >= 2000) {
             voltConfig.biasEnabled = false;
-            voltConfig.baseOffset = 0.0;
             voltConfig.gainRatio = 11.0;
             if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([0]));
         }
@@ -340,7 +341,7 @@ function processVoltmeterData(payload) {
 
     // Calculate uncalibrated voltage for zero-offset calibration
     if (window.Calibration) {
-        let uncal = window.Calibration.calculateVolts(-1, avgRaw, 12, voltConfig.gainRatio, voltConfig.baseOffset, 0);
+        let uncal = window.Calibration.calculateVolts(voltConfig.biasEnabled, -1, avgRaw, 12, voltConfig.gainRatio);
         if (Math.abs(uncal) < 0.05) uncal = 0.0;
         voltConfig.lastRawVin = uncal;
     }

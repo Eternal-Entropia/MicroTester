@@ -29,6 +29,7 @@ struct CompResult {
     uint8_t pinC;        // Probe assignment C (0-2)
     uint32_t value1;     // Primary value: R (ohm*100), C (pF), Vf (mV), hFE
     uint32_t value2;     // Secondary: ESR*100, Vbe(mV), Vth(mV)
+    uint32_t value3;     // Tertiary / Calibration values
     uint16_t flags;      // Subtype flags
 };
 
@@ -38,6 +39,7 @@ void comp_tester_stop();
 void comp_tester_loop();   // Call in main loop
 bool comp_tester_is_done();
 CompResult comp_tester_get_result();
+void comp_tester_set_cal(uint16_t vdda_mv, const uint16_t rl[3], const uint32_t rh[3]);
 
 
 

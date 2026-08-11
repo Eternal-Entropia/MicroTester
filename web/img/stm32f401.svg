@@ -84,10 +84,10 @@
     </g>
     <line x1="143" y1="298" x2="403" y2="298" stroke="#22c55e" stroke-width="2.5" id="svg_47"/>
     <circle cx="403" cy="298" r="4.5" fill="#ef4444" id="svg_48"/>
-    <!-- PB12 (680 Ohms) -->
+    <!-- PB10 (680 Ohms) -->
     <g id="svg_49">
      <polygon points="43,318 128,318 143,328 128,338 43,338 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_50"/>
-     <text x="53" y="332" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_51">PB12</text>
+     <text x="53" y="332" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_51">PB10</text>
     </g>
     <line x1="143" y1="328" x2="223" y2="328" stroke="#22c55e" stroke-width="2.5" id="svg_52"/>
     <g id="svg_53">
@@ -96,10 +96,10 @@
      <text x="250.5" y="332" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_56">680</text>
     </g>
     <line x1="278" y1="328" x2="403" y2="328" stroke="#22c55e" stroke-width="2.5" id="svg_57"/>
-    <!-- PB13 (470k) -->
+    <!-- PB1 (470k) -->
     <g id="svg_58">
      <polygon points="43,353 128,353 143,363 128,373 43,373 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_59"/>
-     <text x="53" y="367" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_60">PB13</text>
+     <text x="53" y="367" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_60">PB1</text>
     </g>
     <line x1="143" y1="363" x2="223" y2="363" stroke="#22c55e" stroke-width="2.5" id="svg_61"/>
     <g id="svg_62">
@@ -128,10 +128,10 @@
     </g>
     <line x1="143" y1="408" x2="403" y2="408" stroke="#22c55e" stroke-width="2.5" id="svg_78"/>
     <circle cx="403" cy="408" r="4.5" fill="#ef4444" id="svg_79"/>
-    <!-- PB14 (680 Ohms) -->
+    <!-- PB12 (680 Ohms) -->
     <g id="svg_80">
      <polygon points="43,428 128,428 143,438 128,448 43,448 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_81"/>
-     <text x="53" y="442" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_82">PB14</text>
+     <text x="53" y="442" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_82">PB12</text>
     </g>
     <line x1="143" y1="438" x2="223" y2="438" stroke="#22c55e" stroke-width="2.5" id="svg_83"/>
     <g id="svg_84">
@@ -140,10 +140,10 @@
      <text x="250.5" y="442" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_87">680</text>
     </g>
     <line x1="278" y1="438" x2="403" y2="438" stroke="#22c55e" stroke-width="2.5" id="svg_88"/>
-    <!-- PB15 (470k) -->
+    <!-- PB13 (470k) -->
     <g id="svg_89">
      <polygon points="43,463 128,463 143,473 128,483 43,483 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_90"/>
-     <text x="53" y="477" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_91">PB15</text>
+     <text x="53" y="477" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_91">PB13</text>
     </g>
     <line x1="143" y1="473" x2="223" y2="473" stroke="#22c55e" stroke-width="2.5" id="svg_92"/>
     <g id="svg_93">
@@ -172,10 +172,10 @@
     </g>
     <line x1="143" y1="518" x2="403" y2="518" stroke="#22c55e" stroke-width="2.5" id="svg_109"/>
     <circle cx="403" cy="518" r="4.5" fill="#ef4444" id="svg_110"/>
-    <!-- PC13 (680 Ohms) -->
+    <!-- PB14 (680 Ohms) -->
     <g id="svg_111">
      <polygon points="43,538 128,538 143,548 128,558 43,558 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_112"/>
-     <text x="53" y="552" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_113">PC13</text>
+     <text x="53" y="552" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_113">PB14</text>
     </g>
     <line x1="143" y1="548" x2="223" y2="548" stroke="#22c55e" stroke-width="2.5" id="svg_114"/>
     <g id="svg_115">
@@ -184,10 +184,10 @@
      <text x="250.5" y="552" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_118">680</text>
     </g>
     <line x1="278" y1="548" x2="403" y2="548" stroke="#22c55e" stroke-width="2.5" id="svg_119"/>
-    <!-- PC14 (470k) -->
+    <!-- PB15 (470k) -->
     <g id="svg_120">
      <polygon points="43,573 128,573 143,583 128,593 43,593 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_121"/>
-     <text x="53" y="587" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_122">PC14</text>
+     <text x="53" y="587" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_122">PB15</text>
     </g>
     <line x1="143" y1="583" x2="223" y2="583" stroke="#22c55e" stroke-width="2.5" id="svg_123"/>
     <g id="svg_124">

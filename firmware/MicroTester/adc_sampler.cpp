@@ -9,8 +9,13 @@ static uint16_t adcDmaBuf16[DMA_BUF_BYTES / 2];
 #define PACK_BUF_SIZE 4096
 static uint8_t adcPackedBuf[PACK_BUF_SIZE];
 
-#define MAX_FRAME_SIZE 3200
+#define MAX_FRAME_SIZE 15000
 static uint8_t oscFrameBuf[MAX_FRAME_SIZE];
+
+// Multi-channel scan state
+static uint8_t multiChList[4];   // Ordered list of active channels (0..3)
+static uint8_t multiChCount = 0;
+static bool    isMultiCh  = false;
 
 static volatile bool isRunning = false;
 static AdcConfig currentConfig;
@@ -29,8 +34,21 @@ static uint32_t oscLastSearchTime = 0;
 
 // ETS State
 static bool isEtsMode = false;
-static uint16_t etsSampleIndex = 0;
-static uint32_t etsNopsPerSample = 1;
+static uint32_t etsCyclesPerStep = 1;
+
+#if defined(ARDUINO_ARCH_STM32)
+static inline void ets_dwt_init() {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static inline uint16_t ets_fast_analogRead_raw() {
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    uint32_t timeout = 10000;
+    while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
+    return (uint16_t)ADC1->DR;
+}
+#endif
 
 static int mapPin(uint8_t configPin) {
     switch(configPin) {
@@ -38,6 +56,11 @@ static int mapPin(uint8_t configPin) {
         case 1: return PA2;
         case 2: return PA3;
         case 3: return PA4;
+        case 4: return PA5;
+        case 5: return PA6;
+        case 6: return PA7;
+        case 7: return PB0;
+        case 8: return PB1;
         default: return PA1;
     }
 }
@@ -85,13 +108,33 @@ static inline void set_channel_bias(uint8_t pinIndex, bool enable) {
 
 void adc_sampler_start(AdcConfig config) {
     currentConfig = config;
+
+    // Build multi-channel list from pinMask. If pinMask is 0, fall back to single pin in config.pin
+    multiChCount = 0;
+    isMultiCh = false;
+    if (config.isOscilloscope) {
+        uint8_t mask = config.pinMask;
+        if (mask == 0) mask = 1 << config.pin; // Single-channel fallback
+        for (uint8_t i = 0; i < 4; i++) {
+            if (mask & (1 << i)) {
+                multiChList[multiChCount++] = i;
+            }
+        }
+        if (multiChCount > 1) isMultiCh = true;
+    }
+
     int pin = mapPin(currentConfig.pin);
     pinMode(pin, INPUT_ANALOG);
     analogRead(pin); // Wake up ADC and GPIO via HAL
-    
+
     #if defined(ARDUINO_ARCH_STM32)
     clear_all_biases();
-    if (currentConfig.pin <= 3) {
+    // Apply bias to ALL active channels in multi-mode, single channel otherwise
+    if (isMultiCh) {
+        for (uint8_t i = 0; i < multiChCount; i++) {
+            set_channel_bias(multiChList[i], currentConfig.enableBias);
+        }
+    } else if (currentConfig.pin <= 3) {
         set_channel_bias(currentConfig.pin, currentConfig.enableBias);
     }
     #endif
@@ -111,22 +154,28 @@ void adc_sampler_start(AdcConfig config) {
     DMA2_Stream0->M0AR = (uint32_t)adcDmaBuf16;
     
     if (currentConfig.isOscilloscope) {
+        // In multi-channel mode DMA NDTR must be a multiple of channel count
+        // so each scan cycle occupies a complete "frame" of samples and wrap-around
+        // never splits a frame.
+        uint32_t stride = (multiChCount > 0) ? multiChCount : 1;
         if (currentConfig.bitness12) {
-            DMA2_Stream0->NDTR = DMA_BUF_BYTES / 2;
-            DMA2_Stream0->CR = (0 << 25) |       
-                               (1 << 13) | // MSIZE=16bit      
-                               (1 << 11) | // PSIZE=16bit      
-                               DMA_SxCR_MINC |   
-                               DMA_SxCR_CIRC |   
-                               (0 << 6); 
+            uint32_t n = (DMA_BUF_BYTES / 2) / stride * stride;
+            DMA2_Stream0->NDTR = n;
+            DMA2_Stream0->CR = (0 << 25) |
+                               (1 << 13) | // MSIZE=16bit
+                               (1 << 11) | // PSIZE=16bit
+                               DMA_SxCR_MINC |
+                               DMA_SxCR_CIRC |
+                               (0 << 6);
         } else {
-            DMA2_Stream0->NDTR = DMA_BUF_BYTES;
-            DMA2_Stream0->CR = (0 << 25) |       
-                               (0 << 13) | // MSIZE=8bit      
-                               (0 << 11) | // PSIZE=8bit      
-                               DMA_SxCR_MINC |   
-                               DMA_SxCR_CIRC |   
-                               (0 << 6); 
+            uint32_t n = (DMA_BUF_BYTES / stride) * stride;
+            DMA2_Stream0->NDTR = n;
+            DMA2_Stream0->CR = (0 << 25) |
+                               (0 << 13) | // MSIZE=8bit
+                               (0 << 11) | // PSIZE=8bit
+                               DMA_SxCR_MINC |
+                               DMA_SxCR_CIRC |
+                               (0 << 6);
         }
     } else {
         DMA2_Stream0->NDTR = DMA_BUF_BYTES / 2;
@@ -153,7 +202,12 @@ void adc_sampler_start(AdcConfig config) {
     uint32_t maxRate = currentConfig.bitness12 ? 2800000 : 3818000; // Physical hardware limits
     if (rateHz > maxRate) rateHz = maxRate;
     
-    uint32_t period = timerClock / rateHz;
+    uint32_t period;
+    if (currentConfig.isOscilloscope && isMultiCh) {
+        period = (timerClock * multiChCount) / rateHz;
+    } else {
+        period = timerClock / rateHz;
+    }
     if (period < 2) period = 2; // Min limit
     
     TIM2->PSC = 0;
@@ -163,30 +217,89 @@ void adc_sampler_start(AdcConfig config) {
     TIM2->CR2 = TIM_CR2_MMS_1; // Update event as TRGO
     
     // 5. Configure ADC1
-    ADC1->CR2 = 0; 
-    uint8_t channel = getAdcChannel(pin);
-    ADC1->SQR3 = channel;
+    ADC1->CR2 = 0;
 
-    if (currentConfig.isOscilloscope) {
-        if (currentConfig.bitness12) {
-            ADC1->CR1 = ADC_CR1_SCAN; // 12-bit resolution
-        } else {
-            ADC1->CR1 = ADC_CR1_SCAN | (2 << 24); // 8-bit resolution
+    // ETS only supported for single channel (accurate timing control is impossible in scan mode)
+    isEtsMode = (currentConfig.isOscilloscope && currentConfig.rateKHz >= 5000 && !currentConfig.bitness12 && !isMultiCh);
+
+    if (isEtsMode) {
+        uint8_t channel = getAdcChannel(pin);
+        ets_dwt_init();
+        DMA2_Stream0->CR &= ~DMA_SxCR_EN;
+        TIM2->CR1 &= ~TIM_CR1_CEN;
+
+        ADC1->CR1 = ADC_CR1_SCAN | (2 << 24); // 8-bit
+        ADC1->SMPR2 &= ~(7 << (3 * channel)); // Fast 3-cycle sampling time
+        ADC1->SQR3 = channel;                 // Set channel ONCE
+        ADC1->CR2 = ADC_CR2_ADON;             // Software trigger only
+
+        uint32_t cpuFreq = 84000000UL;
+        #if defined(SystemCoreClock) && SystemCoreClock > 0
+        cpuFreq = SystemCoreClock;
+        #elif defined(F_CPU) && F_CPU > 0
+        cpuFreq = F_CPU;
+        #endif
+
+        uint32_t periodNs = 1000000UL / currentConfig.rateKHz;
+        if (periodNs < 1) periodNs = 1;
+
+        etsCyclesPerStep = (uint32_t)(((double)periodNs * (double)cpuFreq) / 1000000000.0);
+        if (etsCyclesPerStep == 0) etsCyclesPerStep = 1;
+    } else if (isMultiCh) {
+        // Apparatus-sync multi-channel scan mode
+        // ADC SQR1: L = multiChCount-1 (bits[23:20])
+        // Channels are ALL the same bitness as configured; scan in order of multiChList
+        ADC1->CR1 = ADC_CR1_SCAN | (currentConfig.bitness12 ? 0 : (2 << 24));
+
+        // Set sample time for each channel; use 3 cycles (fastest) or 15 for low rates
+        uint32_t smpr2 = ADC1->SMPR2;
+        for (uint8_t i = 0; i < multiChCount; i++) {
+            uint8_t ch = getAdcChannel(mapPin(multiChList[i]));
+            smpr2 &= ~(7UL << (3 * ch));
+            if (currentConfig.rateKHz <= 1000) smpr2 |= (1UL << (3 * ch)); // 15 cycles
         }
-        ADC1->SMPR2 &= ~(7 << (3 * channel)); 
-        if (currentConfig.rateKHz <= 1000) {
-            ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles sampling time for less voltage sag
+        ADC1->SMPR2 = smpr2;
+
+        // Regular channel sequence: SQR3 (1st..6th), SQR2 (7th..12th), SQR1 (13th..16th + L)
+        uint32_t sqr1 = 0, sqr2 = 0, sqr3 = 0;
+        for (uint8_t i = 0; i < multiChCount; i++) {
+            uint8_t ch = getAdcChannel(mapPin(multiChList[i]));
+            if (i < 6)       sqr3 |= (uint32_t)ch << (5 * i);
+            else if (i < 12) sqr2 |= (uint32_t)ch << (5 * (i - 6));
+            else             sqr1 |= (uint32_t)ch << (5 * (i - 12));
         }
-        ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS; // Ext trigger TIM2
+        sqr1 |= ((uint32_t)(multiChCount - 1)) << 20; // L[3:0] = number of conversions - 1
+
+        ADC1->SQR1 = sqr1;
+        ADC1->SQR2 = sqr2;
+        ADC1->SQR3 = sqr3;
+
+        ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON; // Ext trigger TIM2
+        TIM2->CR1 |= TIM_CR1_CEN;
     } else {
-        ADC1->CR1 = ADC_CR1_SCAN; // 12-bit
-        ADC1->SMPR2 &= ~(7 << (3 * channel)); 
-        ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
-        ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS; // Ext trigger TIM2
+        uint8_t channel = getAdcChannel(pin);
+        ADC1->SQR1 = 0; // CRITICAL: reset scan length L=0 (1 conversion) after multi-mode
+        ADC1->SQR2 = 0;
+        ADC1->SQR3 = channel;
+        if (currentConfig.isOscilloscope) {
+            if (currentConfig.bitness12) {
+                ADC1->CR1 = ADC_CR1_SCAN;
+            } else {
+                ADC1->CR1 = ADC_CR1_SCAN | (2 << 24);
+            }
+            ADC1->SMPR2 &= ~(7 << (3 * channel));
+            if (currentConfig.rateKHz <= 1000) {
+                ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
+            }
+            ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON; // Ext trigger TIM2
+        } else {
+            ADC1->CR1 = ADC_CR1_SCAN; // 12-bit
+            ADC1->SMPR2 &= ~(7 << (3 * channel));
+            ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
+            ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON; // Ext trigger TIM2
+        }
+        TIM2->CR1 |= TIM_CR1_CEN;
     }
-    
-    ADC1->CR2 |= ADC_CR2_ADON; 
-    TIM2->CR1 |= TIM_CR1_CEN;
     #endif
 
     isRunning = true;
@@ -196,12 +309,42 @@ void adc_sampler_start(AdcConfig config) {
         oscState = STATE_ARMED;
         oscSearchIndex = 0;
         oscLastSearchTime = millis();
+    } else {
+        isEtsMode = false;
     }
 }
 
+uint8_t adc_sampler_get_session_id() {
+    return currentConfig.sessionId;
+}
+
+uint8_t adc_sampler_get_channel_mask() {
+    if (!isMultiCh) return 0;  // Single-channel (and ETS) frames don't carry mask
+    uint8_t m = 0;
+    for (uint8_t i = 0; i < multiChCount; i++) m |= (1 << multiChList[i]);
+    return m;
+}
+
+#if defined(ARDUINO_ARCH_STM32)
+static inline uint16_t ets_fast_analogRead(uint8_t channel) {
+    if ((RCC->APB2ENR & RCC_APB2ENR_ADC1EN) == 0) {
+        RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    }
+    if ((ADC1->CR2 & ADC_CR2_ADON) == 0) {
+        ADC1->CR2 |= ADC_CR2_ADON;
+        for(volatile int i=0; i<100; i++);
+    }
+    ADC1->SQR3 = channel;
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    uint32_t timeout = 10000;
+    while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
+    return (uint16_t)ADC1->DR;
+}
+#endif
+
 void adc_sampler_set_bias(bool enable) {
     currentConfig.enableBias = enable;
-    if (currentConfig.pin <= 3 && !currentConfig.isOscilloscope) {
+    if (currentConfig.pin <= 3) {
         #if defined(ARDUINO_ARCH_STM32)
         set_channel_bias(currentConfig.pin, enable);
         #endif
@@ -210,6 +353,7 @@ void adc_sampler_set_bias(bool enable) {
 
 void adc_sampler_stop() {
     isRunning = false;
+    isEtsMode = false;
     #if defined(ARDUINO_ARCH_STM32)
     clear_all_biases();
 
@@ -225,150 +369,267 @@ bool adc_osc_process_frame(uint8_t** outPtr, uint16_t* outLen) {
     if (!isRunning || !currentConfig.isOscilloscope) return false;
     
     #if defined(ARDUINO_ARCH_STM32)
-    uint32_t bufSize = currentConfig.bitness12 ? (DMA_BUF_BYTES / 2) : DMA_BUF_BYTES;
+    if (isEtsMode) {
+        int pin = mapPin(currentConfig.pin);
+        uint8_t channel = getAdcChannel(pin);
+        uint16_t req = currentConfig.reqSamples;
+        if (req > 1600) req = 1600;
+
+        ADC1->SQR3 = channel;
+        uint16_t trigLevel = currentConfig.trigLevel;
+        bool rising = (currentConfig.trigEdge == 1);
+        bool autoTrig = (currentConfig.trigMode == 0);
+
+        // FIX: Find ONE stable trigger point for the entire frame
+        uint32_t startWait = micros();
+        uint16_t prevVal = ets_fast_analogRead_raw();
+        bool triggered = false;
+        uint32_t baseTrigCycles = 0;
+
+        while (micros() - startWait < 500) {
+            uint16_t currVal = ets_fast_analogRead_raw();
+            if (rising) {
+                if (prevVal < trigLevel && currVal >= trigLevel) {
+                    baseTrigCycles = DWT->CYCCNT;
+                    triggered = true;
+                    break;
+                }
+            } else {
+                if (prevVal > trigLevel && currVal <= trigLevel) {
+                    baseTrigCycles = DWT->CYCCNT;
+                    triggered = true;
+                    break;
+                }
+            }
+            prevVal = currVal;
+        }
+
+        if (!triggered) {
+            if (autoTrig) {
+                baseTrigCycles = DWT->CYCCNT;
+            } else {
+                if (currentConfig.trigMode == 2) oscState = STATE_READY;
+                return false;
+            }
+        }
+
+        // FIX: Sample relative to the SINGLE trigger point
+        // This creates correct sequential ETS: sample i is taken at time i*dt after trigger
+        for (uint16_t i = 0; i < req; i++) {
+            uint32_t target = baseTrigCycles + i * etsCyclesPerStep;
+            // Handle 32-bit wrap-around correctly
+            while ((int32_t)(DWT->CYCCNT - target) < 0);
+            
+            // Read sample immediately at precise time
+            uint16_t val = ets_fast_analogRead_raw();
+            oscFrameBuf[i] = (uint8_t)val;
+        }
+
+        *outPtr = oscFrameBuf;
+        *outLen = req;
+
+        if (currentConfig.trigMode == 2) {
+            oscState = STATE_READY;
+        } else {
+            oscState = STATE_ARMED;
+        }
+        return true;
+    }
+    uint32_t bufElemsPerFrame = isMultiCh ? multiChCount : 1;
+    if (bufElemsPerFrame < 1) bufElemsPerFrame = 1;
+    uint32_t bufSize = (currentConfig.bitness12 ? (DMA_BUF_BYTES / 2) : DMA_BUF_BYTES);
+    // Round bufSize down to a multiple of frame size so each scan frame is atomic
+    bufSize -= bufSize % bufElemsPerFrame;
+
     uint32_t currentDmaIndex = bufSize - DMA2_Stream0->NDTR;
     if (currentDmaIndex >= bufSize) currentDmaIndex = 0;
-    
+    // Align read pointer to frame boundary in multi mode (DMA can stop mid-frame)
+    if (isMultiCh) currentDmaIndex = (currentDmaIndex / bufElemsPerFrame) * bufElemsPerFrame;
+
     if (oscState == STATE_ARMED) {
-        // Prevent backlog loop starvation: if search is too far behind current DMA, jump ahead
-        uint32_t backlog = (currentDmaIndex >= oscSearchIndex) ? 
-                           (currentDmaIndex - oscSearchIndex) : 
+        // Align search index to frame boundary (multi-mode) — otherwise it never equals currentDmaIndex
+        if (isMultiCh) oscSearchIndex = (oscSearchIndex / bufElemsPerFrame) * bufElemsPerFrame;
+
+        // Prevent backlog loop starvation: jump ahead if too far behind
+        uint32_t backlog = (currentDmaIndex >= oscSearchIndex) ?
+                           (currentDmaIndex - oscSearchIndex) :
                            (bufSize - oscSearchIndex + currentDmaIndex);
-        if (backlog > 512) {
-            oscSearchIndex = (currentDmaIndex >= 256) ? (currentDmaIndex - 256) : (bufSize - 256 + currentDmaIndex);
+        uint32_t jumpBacklog = 512 * bufElemsPerFrame;
+        if (backlog > jumpBacklog) {
+            oscSearchIndex = (currentDmaIndex >= jumpBacklog / 2) ? (currentDmaIndex - jumpBacklog / 2) : (bufSize - jumpBacklog / 2 + currentDmaIndex);
+            if (isMultiCh) oscSearchIndex = (oscSearchIndex / bufElemsPerFrame) * bufElemsPerFrame;
         }
 
-        // Search for trigger
+        // Trigger search: in multi-mode, search ONLY on first channel of list (index stride = multiChCount)
         bool triggered = false;
-        
-        while (oscSearchIndex != currentDmaIndex) {
-            uint32_t prevIndex = (oscSearchIndex == 0) ? (bufSize - 1) : (oscSearchIndex - 1);
-            uint16_t val, prevVal;
-            if (currentConfig.bitness12) {
-                val = adcDmaBuf16[oscSearchIndex];
-                prevVal = adcDmaBuf16[prevIndex];
-            } else {
-                val = adcDmaBuf8[oscSearchIndex];
-                prevVal = adcDmaBuf8[prevIndex];
-            }
-            
-            uint16_t lvl = currentConfig.trigLevel;
-            if (currentConfig.trigEdge == 1) { // Rising
-                if (prevVal < lvl && val >= lvl) triggered = true;
-            } else { // Falling
-                if (prevVal > lvl && val <= lvl) triggered = true;
-            }
+        uint16_t lvl = currentConfig.trigLevel;
+        uint8_t trigChannelSubIdx = 0;  // trigger on first channel of multiChList
 
-            if (triggered) {
-                oscTriggerIndex = oscSearchIndex;
-                oscState = STATE_WAIT_POST_TRIGGER;
-                break;
+        while (oscSearchIndex != currentDmaIndex) {
+            uint32_t prevIndex;
+            if (isMultiCh) {
+                // Multi: each "sample" is multiChCount elements; search with stride
+                uint32_t aligned = (oscSearchIndex / bufElemsPerFrame) * bufElemsPerFrame;
+                uint32_t sampleIdx = aligned + trigChannelSubIdx;
+                prevIndex = (aligned == 0) ? (bufSize - bufElemsPerFrame + trigChannelSubIdx) : (aligned - bufElemsPerFrame + trigChannelSubIdx);
+                uint16_t val, prevVal;
+                if (currentConfig.bitness12) {
+                    val     = adcDmaBuf16[sampleIdx];
+                    prevVal = adcDmaBuf16[prevIndex];
+                } else {
+                    val     = adcDmaBuf8[sampleIdx];
+                    prevVal = adcDmaBuf8[prevIndex];
+                }
+                if (currentConfig.trigEdge == 1) {
+                    if (prevVal < lvl && val >= lvl) triggered = true;
+                } else {
+                    if (prevVal > lvl && val <= lvl) triggered = true;
+                }
+                if (triggered) {
+                    oscTriggerIndex = aligned;
+                    oscState = STATE_WAIT_POST_TRIGGER;
+                    break;
+                }
+                oscSearchIndex = (aligned + bufElemsPerFrame) % bufSize;
+            } else {
+                prevIndex = (oscSearchIndex == 0) ? (bufSize - 1) : (oscSearchIndex - 1);
+                uint16_t val, prevVal;
+                if (currentConfig.bitness12) {
+                    val     = adcDmaBuf16[oscSearchIndex];
+                    prevVal = adcDmaBuf16[prevIndex];
+                } else {
+                    val     = adcDmaBuf8[oscSearchIndex];
+                    prevVal = adcDmaBuf8[prevIndex];
+                }
+                if (currentConfig.trigEdge == 1) {
+                    if (prevVal < lvl && val >= lvl) triggered = true;
+                } else {
+                    if (prevVal > lvl && val <= lvl) triggered = true;
+                }
+                if (triggered) {
+                    oscTriggerIndex = oscSearchIndex;
+                    oscState = STATE_WAIT_POST_TRIGGER;
+                    break;
+                }
+                oscSearchIndex = (oscSearchIndex + 1) % bufSize;
             }
-            oscSearchIndex = (oscSearchIndex + 1) % bufSize;
         }
-        
+
         // Auto trigger timeout (50ms)
         if (currentConfig.trigMode == 0 && !triggered && (millis() - oscLastSearchTime > 50)) {
             oscTriggerIndex = currentDmaIndex;
+            // Align to frame boundary in multi mode
+            if (isMultiCh) oscTriggerIndex = (oscTriggerIndex / bufElemsPerFrame) * bufElemsPerFrame;
             oscState = STATE_WAIT_POST_TRIGGER;
         }
     }
-    
+
     if (oscState == STATE_WAIT_POST_TRIGGER) {
-        // Wait until we have enough samples post-trigger (reqSamples / 2)
-        uint32_t dist = (currentDmaIndex >= oscTriggerIndex) ? 
-                        (currentDmaIndex - oscTriggerIndex) : 
-                        (bufSize - oscTriggerIndex + currentDmaIndex);
-                        
-        if (dist >= currentConfig.reqSamples / 2) {
-            // Frame is ready
-            uint32_t startIdx = (oscTriggerIndex >= (currentConfig.reqSamples / 2)) ? 
-                                (oscTriggerIndex - currentConfig.reqSamples / 2) : 
-                                (bufSize - (currentConfig.reqSamples / 2 - oscTriggerIndex));
-            
-            uint16_t req = currentConfig.reqSamples;
-            uint8_t over = currentConfig.oversample;
-
-            if (req > 800) {
-                uint32_t step = req / 800;
-                if (step < 1) step = 1;
-
-                if (over > 0) {
-                    for (int i = 0; i < 800; i++) {
-                        uint32_t baseIdx = (startIdx + i * step) % bufSize;
-                        uint32_t sum = 0;
-                        uint32_t count = (step > 64) ? 64 : step; 
-                        for (uint32_t k = 0; k < count; k++) {
-                            sum += currentConfig.bitness12 ? adcDmaBuf16[(baseIdx + k) % bufSize] : adcDmaBuf8[(baseIdx + k) % bufSize];
-                        }
-                        uint16_t avgV = (uint16_t)(sum / count);
-                        if (currentConfig.bitness12) {
-                            ((uint16_t*)oscFrameBuf)[i * 2] = avgV;
-                            ((uint16_t*)oscFrameBuf)[i * 2 + 1] = avgV;
-                        } else {
-                            oscFrameBuf[i * 2] = (uint8_t)avgV;
-                            oscFrameBuf[i * 2 + 1] = (uint8_t)avgV;
-                        }
-                    }
-                } else {
-                    for (int i = 0; i < 800; i++) {
-                        uint32_t baseIdx = (startIdx + i * step) % bufSize;
-                        uint16_t minV = currentConfig.bitness12 ? adcDmaBuf16[baseIdx] : adcDmaBuf8[baseIdx];
-                        uint16_t maxV = minV;
-                        
-                        uint32_t checkCount = (step > 4) ? 4 : step;
-                        uint32_t subStep = step / checkCount;
-                        if (subStep < 1) subStep = 1;
-                        
-                        for (uint32_t k = 1; k < checkCount; k++) {
-                            uint16_t v = currentConfig.bitness12 ? adcDmaBuf16[(baseIdx + k * subStep) % bufSize] : adcDmaBuf8[(baseIdx + k * subStep) % bufSize];
-                            if (v < minV) minV = v;
-                            if (v > maxV) maxV = v;
-                        }
-                        if (currentConfig.bitness12) {
-                            ((uint16_t*)oscFrameBuf)[i * 2] = minV;
-                            ((uint16_t*)oscFrameBuf)[i * 2 + 1] = maxV;
-                        } else {
-                            oscFrameBuf[i * 2] = (uint8_t)minV;
-                            oscFrameBuf[i * 2 + 1] = (uint8_t)maxV;
-                        }
-                    }
-                }
-                *outPtr = oscFrameBuf;
-                *outLen = currentConfig.bitness12 ? 3200 : 1600;
-            } else {
-                if (over > 0) {
-                    uint32_t winSize = 1 << (over * 2); 
-                    for (int i = 0; i < req; i++) {
-                        uint32_t sum = 0;
-                        for (uint32_t k = 0; k < winSize; k++) {
-                            uint32_t idx = (startIdx + i + k) % bufSize;
-                            sum += currentConfig.bitness12 ? adcDmaBuf16[idx] : adcDmaBuf8[idx];
-                        }
-                        if (currentConfig.bitness12) {
-                            ((uint16_t*)oscFrameBuf)[i] = (uint16_t)(sum / winSize);
-                        } else {
-                            oscFrameBuf[i] = (uint8_t)(sum / winSize);
-                        }
-                    }
-                    *outPtr = oscFrameBuf;
-                    *outLen = currentConfig.bitness12 ? (req * 2) : req;
-                } else {
-                    for (int i = 0; i < req; i++) {
-                        if (currentConfig.bitness12) {
-                            ((uint16_t*)oscFrameBuf)[i] = adcDmaBuf16[(startIdx + i) % bufSize];
-                        } else {
-                            oscFrameBuf[i] = adcDmaBuf8[(startIdx + i) % bufSize];
-                        }
-                    }
-                    *outPtr = oscFrameBuf;
-                    *outLen = currentConfig.bitness12 ? (req * 2) : req;
-                }
+        uint32_t req = currentConfig.reqSamples;
+        // Safety clamp: total output must fit oscFrameBuf (MAX_FRAME_SIZE bytes).
+        // Frame units = uint16 in 12-bit, uint8 in 8-bit. Decimated path writes 1600 units per channel.
+        {
+            uint32_t bytesPerUnit = currentConfig.bitness12 ? 2 : 1;
+            uint32_t decimatedUnitsPerCh = 1600;
+            uint32_t maxDecimatedUnits = (MAX_FRAME_SIZE / bytesPerUnit) / bufElemsPerFrame;
+            if (req > 800 && decimatedUnitsPerCh > maxDecimatedUnits) {
+                req = 800; // fall into non-decimated path, clamp next
             }
-            
+            uint32_t maxReq = (MAX_FRAME_SIZE / bytesPerUnit) / bufElemsPerFrame;
+            if (req > maxReq) req = maxReq;
+        }
+        // In multi mode req = samples PER CHANNEL; total raw elements needed = req * multiChCount
+        uint32_t reqRawElems = req * bufElemsPerFrame;
+
+        // Wait until enough samples post-trigger
+        uint32_t dist = (currentDmaIndex >= oscTriggerIndex) ?
+                        (currentDmaIndex - oscTriggerIndex) :
+                        (bufSize - oscTriggerIndex + currentDmaIndex);
+
+        if (dist >= reqRawElems / 2) {
+            uint32_t startIdx = (oscTriggerIndex >= (reqRawElems / 2)) ?
+                                (oscTriggerIndex - reqRawElems / 2) :
+                                (bufSize - (reqRawElems / 2 - oscTriggerIndex));
+            // Align startIdx to frame boundary
+            startIdx = (startIdx / bufElemsPerFrame) * bufElemsPerFrame;
+
+            uint8_t over = currentConfig.oversample;
+            uint16_t outOffset = 0;
+
+            // Demultiplex: for each channel, extract stride-subsequence and process.
+            // Writes per-channel data in UNITS (uint16 if 12-bit, uint8 if 8-bit) starting at outUnits.
+            uint32_t outUnits = 0;  // offset in units (not bytes)
+            uint16_t* outBuf16 = (uint16_t*)oscFrameBuf;
+            uint8_t*  outBuf8  = oscFrameBuf;
+
+            for (uint8_t ci = 0; ci < bufElemsPerFrame; ci++) {
+                uint32_t chUnits = 0;  // units written for this channel
+                if (req > 800) {
+                    uint32_t step = req / 800;
+                    if (step < 1) step = 1;
+                    if (over > 0) {
+                        for (int i = 0; i < 800; i++) {
+                            uint32_t baseRaw = (startIdx + (uint32_t)(i * step) * bufElemsPerFrame + ci) % bufSize;
+                            uint32_t sum = 0;
+                            uint32_t count = (step > 64) ? 64 : step;
+                            for (uint32_t k = 0; k < count; k++) {
+                                uint32_t e = (baseRaw + k * bufElemsPerFrame) % bufSize;
+                                sum += currentConfig.bitness12 ? adcDmaBuf16[e] : adcDmaBuf8[e];
+                            }
+                            uint16_t avgV = (uint16_t)(sum / count);
+                            if (currentConfig.bitness12) { outBuf16[outUnits + i * 2] = avgV; outBuf16[outUnits + i * 2 + 1] = avgV; }
+                            else { outBuf8[outUnits + i * 2] = (uint8_t)avgV; outBuf8[outUnits + i * 2 + 1] = (uint8_t)avgV; }
+                        }
+                    } else {
+                        for (int i = 0; i < 800; i++) {
+                            uint32_t baseRaw = (startIdx + (uint32_t)(i * step) * bufElemsPerFrame + ci) % bufSize;
+                            uint16_t minV = currentConfig.bitness12 ? adcDmaBuf16[baseRaw] : adcDmaBuf8[baseRaw];
+                            uint16_t maxV = minV;
+                            uint32_t checkCount = (step > 4) ? 4 : step;
+                            uint32_t subStep = step / checkCount;
+                            if (subStep < 1) subStep = 1;
+                            for (uint32_t k = 1; k < checkCount; k++) {
+                                uint32_t e = (baseRaw + k * subStep * bufElemsPerFrame) % bufSize;
+                                uint16_t v = currentConfig.bitness12 ? adcDmaBuf16[e] : adcDmaBuf8[e];
+                                if (v < minV) minV = v;
+                                if (v > maxV) maxV = v;
+                            }
+                            if (currentConfig.bitness12) { outBuf16[outUnits + i * 2] = minV; outBuf16[outUnits + i * 2 + 1] = maxV; }
+                            else { outBuf8[outUnits + i * 2] = (uint8_t)minV; outBuf8[outUnits + i * 2 + 1] = (uint8_t)maxV; }
+                        }
+                    }
+                    chUnits = 1600; // 800 pairs min/max
+                } else {
+                    if (over > 0) {
+                        uint32_t winSize = 1 << (over * 2);
+                        for (uint32_t i = 0; i < req; i++) {
+                            uint32_t sum = 0;
+                            for (uint32_t k = 0; k < winSize; k++) {
+                                uint32_t e = (startIdx + (i + k) * bufElemsPerFrame + ci) % bufSize;
+                                sum += currentConfig.bitness12 ? adcDmaBuf16[e] : adcDmaBuf8[e];
+                            }
+                            if (currentConfig.bitness12) outBuf16[outUnits + i] = (uint16_t)(sum / winSize);
+                            else                          outBuf8[outUnits + i] = (uint8_t)(sum / winSize);
+                        }
+                    } else {
+                        for (uint32_t i = 0; i < req; i++) {
+                            uint32_t e = (startIdx + i * bufElemsPerFrame + ci) % bufSize;
+                            if (currentConfig.bitness12) outBuf16[outUnits + i] = adcDmaBuf16[e];
+                            else                          outBuf8[outUnits + i] = adcDmaBuf8[e];
+                        }
+                    }
+                    chUnits = req;
+                }
+                outUnits += chUnits;
+            }
+
+            *outPtr = oscFrameBuf;
+            uint32_t bytesPerUnit = currentConfig.bitness12 ? 2 : 1;
+            *outLen = (uint16_t)(outUnits * bytesPerUnit);
+
             // Re-arm logic
             if (currentConfig.trigMode == 2) {
-                oscState = STATE_READY; // SINGLE mode: stop capturing
+                oscState = STATE_READY;
             } else {
                 oscState = STATE_ARMED;
                 oscSearchIndex = currentDmaIndex;
@@ -425,4 +686,42 @@ void adc_sampler_consume(int count) {
         count /= 2;
         lastDmaIndex = (lastDmaIndex + count) % (DMA_BUF_BYTES / 2);
     }
+}
+
+uint32_t adc_sampler_measure_vrefint_sum4096() {
+#if defined(ARDUINO_ARCH_STM32)
+    if ((RCC->APB2ENR & RCC_APB2ENR_ADC1EN) == 0) RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    ADC1->CR2 = 0; // Stop ADC before modifying CR1
+    ADC1->SR = 0;  // Clear OVR and EOC flags to unfreeze DR
+    ADC1->CR1 = 0; // Set 12-bit mode
+    
+    ADC->CCR |= (1 << 23); // TSVREFE
+    ADC1->SQR3 = 17; // VREFINT channel
+    ADC1->SMPR1 |= (7 << 21); // Max sample time (480 cycles)
+    ADC1->CR2 |= ADC_CR2_ADON;
+    delay(2);
+    
+    // First conversion is dummy
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    uint32_t timeout = 10000;
+    while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
+    uint16_t dump = ADC1->DR;
+    
+    uint32_t sum = 0;
+    for (int i = 0; i < 4096; i++) {
+        ADC1->CR2 |= ADC_CR2_SWSTART;
+        timeout = 10000;
+        while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
+        sum += ADC1->DR;
+    }
+    ADC1->CR2 = 0;
+    ADC->CCR &= ~(1 << 23);
+    return sum;
+#else
+    return 1500 * 4096;
+#endif
+}
+
+uint16_t adc_sampler_measure_vrefint() {
+    return adc_sampler_measure_vrefint_sum4096() / 4096;
 }

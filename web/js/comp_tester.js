@@ -106,7 +106,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pinC: dv.getUint8(3),
             value1: dv.getUint32(4, true),
             value2: dv.getUint32(8, true),
-            flags: dv.getUint16(12, true)
+            value3: (dv.byteLength >= 16) ? dv.getUint32(12, true) : 0,
+            flags: (dv.byteLength >= 18) ? dv.getUint16(16, true) : ((dv.byteLength >= 14) ? dv.getUint16(12, true) : 0)
         };
     }
     
@@ -139,14 +140,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 10: // COMP_RESISTOR
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M2 12h4l2-5 4 10 4-10 2 5h4"/></svg>`;
+                let rOffset = 0;
+                let rlA = 680, rlB = 680, rlC = 680;
+                let rhA = 470000, rhB = 470000, rhC = 470000;
+                if (typeof window.Calibration !== 'undefined') {
+                    if (window.Calibration.compOffsetR) rOffset = window.Calibration.compOffsetR;
+                    if (window.Calibration.compRL) {
+                        rlA = window.Calibration.compRL[r.pinA] || 680;
+                        rlB = window.Calibration.compRL[r.pinB] || 680;
+                        if (r.pinC < 3) rlC = window.Calibration.compRL[r.pinC] || 680;
+                    }
+                    if (window.Calibration.compRH) {
+                        rhA = window.Calibration.compRH[r.pinA] || 470000;
+                        rhB = window.Calibration.compRH[r.pinB] || 470000;
+                        if (r.pinC < 3) rhC = window.Calibration.compRH[r.pinC] || 470000;
+                    }
+                }
+                
+                // Calibration scaling factor for resistor measurement
+                // RL range (<= 138.6kOhm): nominal sum is 680 + 680 = 1360 Ohms
+                // RH range (> 138.6kOhm): nominal sum is 470k + 470k = 940000 Ohms
+                let r1_raw = r.value1 / 100;
+                const scale1 = (r1_raw > 138600) ? ((rhA + rhB) / 940000.0) : ((rlA + rlB) / 1360.0);
+                const r1 = Math.max(0, (r.value1 * scale1) - rOffset);
+                
                 if (r.value2 > 0) {
+                    let r2_raw = r.value2 / 100;
+                    const scale2 = (r2_raw > 138600) ? ((rhB + rhC) / 940000.0) : ((rlB + rlC) / 1360.0);
+                    const r2 = Math.max(0, (r.value2 * scale2) - rOffset);
+                    
                     typeName = 'Dual Resistors';
-                    value = `R1 = ${formatResistance(r.value1)}`;
-                    secondary = `R2 = ${formatResistance(r.value2)}`;
+                    value = `R1 = ${formatResistance(r1)}`;
+                    secondary = `R2 = ${formatResistance(r2)}`;
                     probeMap = `R1: ${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}  |  R2: ${probeLabels[r.pinB]} ⟷ ${probeLabels[r.pinC]}`;
                 } else {
                     typeName = 'Resistor';
-                    value = formatResistance(r.value1);
+                    value = formatResistance(r1);
                     probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
                 }
                 statusEl.innerText = 'Component identified';
@@ -171,7 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r.value1 < 900) dType = 'Silicon';
                 else if (r.value1 < 1500) dType = 'Silicon / Germanium';
                 
-                secondary = `Type: ${dType}`;
+                let current_mA = ((3300 - r.value1) / 1360).toFixed(2);
+                secondary = `Type: ${dType}  |  If ≈ ${current_mA} mA`;
                 if (r.value2 > 0) {
                     secondary += `  |  C = ${formatCapacitance(r.value2)}`;
                 }
@@ -183,18 +213,77 @@ document.addEventListener('DOMContentLoaded', () => {
             case 21: // COMP_BJT
                 const isNPN = r.flags & 0x01;
                 const iceo = r.flags >> 4;
+                const vbe = r.value2 & 0xFFFF;
+                const cob = r.value2 >>> 16;
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="9" y1="7" x2="9" y2="17" stroke-width="3"/><line x1="9" y1="9" x2="16" y2="5"/><line x1="9" y1="15" x2="16" y2="19"/></svg>`;
                 typeName = `BJT (${isNPN ? 'NPN' : 'PNP'})`;
                 value = `hFE = ${r.value1}`;
-                secondary = `Vbe = ${r.value2} mV\nIceo = ${iceo} μA`;
+                let iceoStr = (iceo === 0) ? '< 1 μA' : ((iceo >= 1000) ? (iceo / 1000).toFixed(2) + ' mA' : iceo + ' μA');
+                secondary = `Vbe = ${vbe} mV  |  Iceo = ${iceoStr}`;
+                if (cob > 0) {
+                    let fT_str = "";
+                    const fT_MHz = 1500 / cob;
+                    if (fT_MHz < 1) {
+                        fT_str = Math.round(fT_MHz * 1000) + " kHz";
+                    } else {
+                        fT_str = Math.round(fT_MHz) + " MHz";
+                    }
+                    secondary += `\nCcb = ${formatCapacitance(cob)} (fT ≈ ${fT_str})`;
+                }
                 probeMap = `B: ${probeLabels[r.pinA]}  C: ${probeLabels[r.pinB]}  E: ${probeLabels[r.pinC]}`;
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';
                 break;
+            case 22: // COMP_MOSFET
+                {
+                    const isPch = (r.flags & 0x08) !== 0;
+                    const isNch = !isPch;
+                    const chName = isPch ? 'P-Channel' : 'N-Channel';
+                    const modeName = (r.flags & 0x20) ? 'Depletion' : 'Enhancement';
+                    
+                    if (isPch) {
+                        icon = `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="3" y1="12" x2="8" y2="12"/><line x1="8" y1="7" x2="8" y2="17"/><line x1="10" y1="7" x2="10" y2="9"/><line x1="10" y1="11" x2="10" y2="13"/><line x1="10" y1="15" x2="10" y2="17"/><line x1="10" y1="7" x2="16" y2="7"/><line x1="16" y1="7" x2="16" y2="4"/><line x1="10" y1="17" x2="16" y2="17"/><line x1="16" y1="17" x2="16" y2="20"/><line x1="10" y1="12" x2="16" y2="12"/><polygon points="14,12 11,10 11,14" fill="#38bdf8"/></svg>`;
+                    } else {
+                        icon = `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="3" y1="12" x2="8" y2="12"/><line x1="8" y1="7" x2="8" y2="17"/><line x1="10" y1="7" x2="10" y2="9"/><line x1="10" y1="11" x2="10" y2="13"/><line x1="10" y1="15" x2="10" y2="17"/><line x1="10" y1="7" x2="16" y2="7"/><line x1="16" y1="7" x2="16" y2="4"/><line x1="10" y1="17" x2="16" y2="17"/><line x1="16" y1="17" x2="16" y2="20"/><line x1="10" y1="12" x2="16" y2="12"/><polygon points="10,12 13,10 13,14" fill="#38bdf8"/></svg>`;
+                    }
+                    
+                    typeName = `MOSFET (${chName} ${modeName})`;
+                    
+                    const vthV = (r.value1 / 1000).toFixed(2);
+                    value = `Vth = ${vthV} V`;
+                    
+                    const rdsMohm = r.value2;
+                    if (rdsMohm === 0xFFFF || rdsMohm >= 60000) {
+                        secondary = `Rds(on) = > 60 Ω (Standard 10V Gate MOSFET, Vgs=3.3V ≤ Vth)`;
+                    } else if (rdsMohm > 0 && rdsMohm < 300) {
+                        secondary = `Rds(on) = < 0.5 Ω (@ Vgs=3.3V)`;
+                    } else if (rdsMohm >= 1000) {
+                        secondary = `Rds(on) = ${(rdsMohm / 1000).toFixed(2)} Ω (@ Vgs=3.3V)`;
+                    } else if (rdsMohm > 0) {
+                        secondary = `Rds(on) = ${rdsMohm} mΩ (@ Vgs=3.3V)`;
+                    } else {
+                        secondary = `Rds(on) = < 0.1 Ω (@ Vgs=3.3V)`;
+                    }
+                    if (r.value3 > 0) {
+                        secondary += `  |  Cg = ${formatCapacitance(r.value3)}`;
+                    }
+                    
+                    probeMap = `G: ${probeLabels[r.pinA]}  D: ${probeLabels[r.pinB]}  S: ${probeLabels[r.pinC]}`;
+                    statusEl.innerText = 'Component identified';
+                    statusEl.className = 'comp-status success';
+                }
+                break;
             case 30: // SHORT
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`;
                 typeName = 'Short Circuit';
-                value = '< 1 Ω';
+                {
+                    const rShort = Math.max(0, r.value1 - (window.Calibration?.compOffsetR || 0));
+                    if (rShort > 0) {
+                        value = formatResistance(rShort);
+                    } else {
+                        value = '< 0.1 Ω';
+                    }
+                }
                 probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Short detected';
                 statusEl.className = 'comp-status warning';
@@ -234,6 +323,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (r.type === 21) { // BJT
                 const isNPN = r.flags & 0x01;
                 resultPinout.innerHTML = buildBJTDiagram(isNPN, r.pinA, r.pinB, r.pinC);
+                resultPinout.style.display = 'block';
+            } else if (r.type === 22) { // MOSFET
+                const isPch = (r.flags & 0x08) !== 0;
+                const isEnhancement = (r.flags & 0x10) !== 0;
+                resultPinout.innerHTML = buildMOSFETDiagram(isPch, isEnhancement, r.pinA, r.pinB, r.pinC);
                 resultPinout.style.display = 'block';
             } else {
                 resultPinout.style.display = 'none';
@@ -355,7 +449,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildBJTDiagram(isNPN, pinB, pinC, pinE) {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
-        return `<svg viewBox="0 0 220 160" class="comp-schematic">
+        return `<svg viewBox="0 0 220 180" class="comp-schematic">
             <!-- Circle boundary -->
             <circle cx="110" cy="80" r="55" fill="rgba(56, 189, 248, 0.05)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="1.5" stroke-dasharray="4,3"/>
             <!-- Base lead & bar -->
@@ -378,10 +472,63 @@ document.addEventListener('DOMContentLoaded', () => {
             <text x="200" y="20" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">Collector (C)</text>
             <text x="200" y="45" fill="#94a3b8" font-size="10" text-anchor="end">${probes[pinC]}</text>
 
-            <text x="200" y="125" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">Emitter (E)</text>
-            <text x="200" y="150" fill="#94a3b8" font-size="10" text-anchor="end">${probes[pinE]}</text>
+            <text x="200" y="122" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">Emitter (E)</text>
+            <text x="200" y="144" fill="#94a3b8" font-size="10" text-anchor="end">${probes[pinE]}</text>
 
-            <text x="110" y="155" fill="#f59e0b" font-size="13" font-weight="bold" text-anchor="middle">${isNPN ? 'BJT NPN' : 'BJT PNP'}</text>
+            <text x="110" y="172" fill="#f59e0b" font-size="13" font-weight="bold" text-anchor="middle">${isNPN ? 'BJT NPN' : 'BJT PNP'}</text>
+        </svg>`;
+    }
+
+    function buildMOSFETDiagram(isPch, isEnhancement, pinG, pinD, pinS) {
+        const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
+        const chStr = isPch ? 'P-CH' : 'N-CH';
+        const modeStr = isEnhancement ? 'ENH' : 'DEP';
+        
+        return `<svg viewBox="0 0 220 180" class="comp-schematic">
+            <!-- Circle boundary -->
+            <circle cx="110" cy="80" r="55" fill="rgba(56, 189, 248, 0.05)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="1.5" stroke-dasharray="4,3"/>
+            
+            <!-- Gate lead & Insulated Bar -->
+            <line x1="20" y1="80" x2="72" y2="80" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="72" y1="45" x2="72" y2="115" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+            
+            <!-- Channel Bars (segmented for Enhancement) -->
+            ${isEnhancement 
+                ? '<line x1="80" y1="48" x2="80" y2="64" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/><line x1="80" y1="72" x2="80" y2="88" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/><line x1="80" y1="96" x2="80" y2="112" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>'
+                : '<line x1="80" y1="48" x2="80" y2="112" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>'
+            }
+            
+            <!-- Drain lead -->
+            <line x1="80" y1="56" x2="140" y2="56" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="140" y1="56" x2="140" y2="30" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="140" y1="30" x2="200" y2="30" stroke="#38bdf8" stroke-width="2.5"/>
+            
+            <!-- Source lead & Substrate tie -->
+            <line x1="80" y1="104" x2="140" y2="104" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="140" y1="104" x2="140" y2="130" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="140" y1="130" x2="200" y2="130" stroke="#38bdf8" stroke-width="2.5"/>
+            
+            <!-- Substrate / Bulk center line -->
+            <line x1="80" y1="80" x2="140" y2="80" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="140" y1="80" x2="140" y2="104" stroke="#38bdf8" stroke-width="2.5"/>
+            
+            <!-- Substrate Arrow (N-Ch points IN towards channel, P-Ch points OUT) -->
+            ${!isPch 
+                ? '<polygon points="86,80 102,73 102,87" fill="#38bdf8"/>' 
+                : '<polygon points="106,80 90,73 90,87" fill="#38bdf8"/>'}
+            
+            <!-- Pin labels -->
+            <text x="20" y="65" fill="#38bdf8" font-size="11" font-weight="bold">Gate (G)</text>
+            <text x="20" y="98" fill="#94a3b8" font-size="10">${probes[pinG]}</text>
+
+            <text x="200" y="20" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">Drain (D)</text>
+            <text x="200" y="45" fill="#94a3b8" font-size="10" text-anchor="end">${probes[pinD]}</text>
+
+            <text x="200" y="122" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">Source (S)</text>
+            <text x="200" y="144" fill="#94a3b8" font-size="10" text-anchor="end">${probes[pinS]}</text>
+
+            <!-- Bottom title in gold -->
+            <text x="110" y="172" fill="#f59e0b" font-size="13" font-weight="bold" text-anchor="middle">MOSFET ${chStr} ${modeStr}</text>
         </svg>`;
     }
 });

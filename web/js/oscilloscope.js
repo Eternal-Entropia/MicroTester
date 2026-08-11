@@ -24,7 +24,7 @@
         adcRes: 255,          // 8-bit resolution
         divider: 1.0,
         biasEnabled: true,
-        baseOffsetConfig: 0.0,
+
         resolution: 8,
 
         // Display
@@ -39,9 +39,13 @@
         triggerLevel: 0,
         triggered: false,
         singleCaptured: false,
+        sessionId: 0,
+        framesCollectedInSession: 0,
 
         // Data
         currentFrame: null,
+        isEts: false,          // true when equivalent-time sampling is active
+        reqSamplesSent: 0,     // reqSamples sent to firmware (for decimation time base)
 
         // Actual PC Rate
         actualRateSamples: 0,
@@ -81,18 +85,18 @@
         return (v * 1000).toFixed(0) + ' mV';
     }
 
-    function rawToVolts(raw) {
-        let ch = oscState.multiChannel ? oscState.activeChannels[oscState.currentMultiIdx] : oscState.channel;
+    function rawToVolts(raw, ch) {
+        if (ch === undefined) ch = oscState.multiChannel ? oscState.activeChannels[oscState.currentMultiIdx] : oscState.channel;
         if (ch === 0 || ch <= 3) {
             let freqComp = 0;
             if (oscState.biasEnabled) {
                 let maxRate = oscState.resolution === 12 ? 2800 : 3818;
                 let actualRateKHz = Math.min(oscState.sampleRateKHz, maxRate);
-                freqComp = (actualRateKHz - 1000) * 0.0022; 
+                freqComp = (actualRateKHz - 1000) * 0.0022;
             }
-            
+
             if (window.Calibration) {
-                return window.Calibration.calculateVolts(ch, raw, oscState.resolution, oscState.divider, oscState.baseOffsetConfig, freqComp);
+                return window.Calibration.calculateVolts(oscState.biasEnabled, ch, raw, oscState.resolution, oscState.divider, freqComp);
             }
             return 0;
         } else {
@@ -105,53 +109,8 @@
 
     // ======================== Signal Period & PLL Trigger ========================
     function findSignalPeriod(samples) {
-        if (!samples || samples.length < 20) return 0;
-
-        let minV = Infinity, maxV = -Infinity;
-        for (let i = 0; i < samples.length; i++) {
-            const v = samples[i];
-            if (v < minV) minV = v;
-            if (v > maxV) maxV = v;
-        }
-        const vPP = maxV - minV;
-        if (vPP < 0.03) return 0;
-
-        const level = minV + vPP * 0.5;
-        const rising = oscState.triggerEdge === 'rising';
-        const hyst = vPP * 0.04;
-
-        const edges = [];
-        for (let i = 1; i < samples.length - 1; i++) {
-            const prev = samples[i - 1];
-            const curr = samples[i];
-
-            let isEdge = false;
-            if (rising) {
-                if (prev <= (level - hyst) && curr >= (level + hyst)) isEdge = true;
-                else if (prev < level && curr >= level) isEdge = true;
-            } else {
-                if (prev >= (level + hyst) && curr <= (level - hyst)) isEdge = true;
-                else if (prev > level && curr <= level) isEdge = true;
-            }
-
-            if (isEdge) {
-                const frac = (curr !== prev) ? Math.max(0, Math.min(1, (level - prev) / (curr - prev))) : 0;
-                edges.push(i + frac);
-            }
-        }
-
-        if (edges.length < 2) return 0;
-
-        let totalDist = 0;
-        let count = 0;
-        for (let k = 1; k < edges.length; k++) {
-            const dist = edges[k] - edges[k - 1];
-            if (dist > 1.5) {
-                totalDist += dist;
-                count++;
-            }
-        }
-        return count > 0 ? (totalDist / count) : 0;
+        // Obsolete, replaced by robust logic in computeMeasurements
+        return 0;
     }
 
     let pllLockedTrigPos = null;
@@ -174,20 +133,20 @@
 
         let level = oscState.triggerLevel;
         let rising = oscState.triggerEdge === 'rising';
-        let hyst = vPP * 0.02; 
-        
+        let hyst = vPP * 0.02;
+
         let postTrigSamples = Math.floor(samplesOnScreen * 0.5);
         if (postTrigSamples < 1) postTrigSamples = 1;
-        
+
         let searchEnd = samples.length - postTrigSamples - 1;
-        let searchStart = Math.floor(samplesOnScreen * 0.5); 
+        let searchStart = Math.floor(samplesOnScreen * 0.5);
         if (searchStart < 1) searchStart = 1;
-        
+
         // Search backwards to find the most recent edge (lowest latency)
         for (let i = searchEnd; i >= searchStart; i--) {
             const prev = samples[i - 1];
             const curr = samples[i];
-            
+
             if (rising) {
                 if (prev < level && curr >= level) {
                     // Check simple hysteresis using a slightly older sample
@@ -222,31 +181,157 @@
             sum += v;
         }
         const vAvg = sum / samples.length;
-        const vPP = vMax - vMin;
+        const vPP_raw = vMax - vMin;
 
-        let freq = 0, period = 0;
-        // Only calculate frequency if VPP is above 50 mV noise threshold
-        if (vPP > 0.05) {
-            const isDecimated = (samples.length === 1600);
-            let crossings = 0;
+        let freq = 0, period = 0, duty = 0;
+
+        if (vPP_raw > 0.05) {
+            const reqRate = oscState.sampleRateKHz;
+            const isEts = reqRate >= 5000;
+            const isDecimated = !isEts && (samples.length === 1600);
+
+            const wave = [];
             if (isDecimated) {
-                for (let i = 2; i < samples.length; i += 2) {
-                    const prevAvg = (samples[i - 2] + samples[i - 1]) / 2;
-                    const currAvg = (samples[i] + samples[i + 1]) / 2;
-                    if (prevAvg < vAvg && currAvg >= vAvg) crossings++;
+                for (let i = 0; i < samples.length; i += 2) {
+                    wave.push((samples[i] + samples[i + 1]) / 2);
                 }
-                const totalTime = oscState.timePerDiv * GRID_DIVISIONS_X;
-                freq = crossings > 0 ? crossings / totalTime : 0;
             } else {
-                for (let i = 1; i < samples.length; i++) {
-                    if (samples[i - 1] < vAvg && samples[i] >= vAvg) crossings++;
+                for (let i = 0; i < samples.length; i++) {
+                    wave.push(samples[i]);
                 }
-                freq = crossings > 0 ? (crossings * sampleRate) / samples.length : 0;
             }
-            period = freq > 0 ? 1 / freq : 0;
+
+            // --- Robust Top and Base (Histogram Method) ---
+            const BINS = 100;
+            const hist = new Int32Array(BINS);
+            for (let i = 0; i < wave.length; i++) {
+                let bin = Math.floor(((wave[i] - vMin) / vPP_raw) * (BINS - 1));
+                if (bin < 0) bin = 0;
+                if (bin >= BINS) bin = BINS - 1;
+                hist[bin]++;
+            }
+
+            let maxLowBin = 0, maxLowCount = -1;
+            for (let i = 0; i < BINS / 2; i++) {
+                if (hist[i] > maxLowCount) {
+                    maxLowCount = hist[i];
+                    maxLowBin = i;
+                }
+            }
+            let maxHighBin = BINS / 2, maxHighCount = -1;
+            for (let i = Math.floor(BINS / 2); i < BINS; i++) {
+                if (hist[i] > maxHighCount) {
+                    maxHighCount = hist[i];
+                    maxHighBin = i;
+                }
+            }
+
+            const vBase = vMin + (maxLowBin / (BINS - 1)) * vPP_raw;
+            const vTop = vMin + (maxHighBin / (BINS - 1)) * vPP_raw;
+            const vAmp = vTop - vBase;
+
+            // If the signal is too noisy or doesn't have clear levels, fallback to vMin/vMax
+            const mid = vAmp > 0.05 ? vBase + vAmp * 0.5 : vMin + vPP_raw * 0.5;
+            const hyst = vAmp > 0.05 ? vAmp * 0.05 : vPP_raw * 0.05;
+
+            // --- Edge Detection ---
+            const risingEdges = [];
+            const fallingEdges = [];
+
+            if (wave.length > 0) {
+                let state = wave[0] > mid ? 1 : 0;
+                for (let i = 1; i < wave.length; i++) {
+                    const prev = wave[i - 1];
+                    const curr = wave[i];
+
+                    if (state === 0 && curr > mid + hyst) {
+                        const frac = (curr !== prev) ? (mid - prev) / (curr - prev) : 0;
+                        risingEdges.push(i - 1 + frac);
+                        state = 1;
+                    } else if (state === 1 && curr < mid - hyst) {
+                        const frac = (curr !== prev) ? (mid - prev) / (curr - prev) : 0;
+                        fallingEdges.push(i - 1 + frac);
+                        state = 0;
+                    }
+                }
+            }
+
+            // Match the firmware's exact decimation logic to get the TRUE time window
+            let effRate = sampleRate;
+            if (isDecimated && oscState.reqSamplesSent > 0) {
+                const numBuckets = samples.length / 2; // 800
+                let step = Math.floor(oscState.reqSamplesSent / numBuckets);
+                if (step < 1) step = 1;
+                const actualSamplesCovered = step * numBuckets;
+                effRate = (sampleRate * numBuckets) / actualSamplesCovered;
+            } else if (isDecimated) {
+                effRate = (sampleRate * samples.length / 2) / samples.length;
+            }
+
+            // --- Median Period Filtering ---
+            const allDists = [];
+            for (let i = 1; i < risingEdges.length; i++) {
+                allDists.push(risingEdges[i] - risingEdges[i - 1]);
+            }
+            for (let i = 1; i < fallingEdges.length; i++) {
+                allDists.push(fallingEdges[i] - fallingEdges[i - 1]);
+            }
+
+            if (allDists.length > 0) {
+                // Find median period distance
+                allDists.sort((a, b) => a - b);
+                const medianPeriod = allDists[Math.floor(allDists.length / 2)];
+
+                // Average only valid distances close to median (+/- 20%) to ignore missed/spurious edges
+                let validSum = 0, validCount = 0;
+                for (let i = 0; i < allDists.length; i++) {
+                    if (Math.abs(allDists[i] - medianPeriod) < medianPeriod * 0.2) {
+                        validSum += allDists[i];
+                        validCount++;
+                    }
+                }
+
+                const avgPeriodSamples = validCount > 0 ? validSum / validCount : medianPeriod;
+                period = avgPeriodSamples / effRate;
+                freq = period > 0 ? 1 / period : 0;
+
+                // --- Robust Duty Cycle ---
+                let highSum = 0, highCount = 0;
+                let lowSum = 0, lowCount = 0;
+
+                const allEdges = [];
+                for (let i = 0; i < risingEdges.length; i++) allEdges.push({ pos: risingEdges[i], type: 'rising' });
+                for (let i = 0; i < fallingEdges.length; i++) allEdges.push({ pos: fallingEdges[i], type: 'falling' });
+                allEdges.sort((a, b) => a.pos - b.pos);
+
+                for (let i = 1; i < allEdges.length; i++) {
+                    const prevEdge = allEdges[i - 1];
+                    const currEdge = allEdges[i];
+                    const dist = currEdge.pos - prevEdge.pos;
+
+                    // Ensure we only sum valid distances (e.g. less than 90% of full period)
+                    if (dist > 0 && dist < avgPeriodSamples * 0.9) {
+                        if (prevEdge.type === 'rising' && currEdge.type === 'falling') {
+                            highSum += dist;
+                            highCount++;
+                        } else if (prevEdge.type === 'falling' && currEdge.type === 'rising') {
+                            lowSum += dist;
+                            lowCount++;
+                        }
+                    }
+                }
+
+                const avgHigh = highCount > 0 ? highSum / highCount : 0;
+                const avgLow = lowCount > 0 ? lowSum / lowCount : 0;
+
+                if (avgHigh + avgLow > 0) {
+                    duty = (avgHigh / (avgHigh + avgLow)) * 100;
+                }
+            }
         }
 
-        return { vMin, vMax, vPP, vAvg, freq, period };
+        // Return the absolute peak-to-peak for UI, as is standard
+        return { vMin, vMax, vPP: vPP_raw, vAvg, freq, period, duty };
     }
 
     // ======================== Canvas Rendering ========================
@@ -359,17 +444,20 @@
         const totalVolts = oscState.voltsPerDiv * GRID_DIVISIONS_Y;
         const centerV = oscState.yOffset * oscState.voltsPerDiv;
 
-        // Target trigger position locked at 50% X position (center line of screen)
-        const targetTrigPx = w * 0.5;
+        // ETS only runs single-channel. Multi-channel and realtime use trigger-at-center.
+        const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
 
-        // In frame-based architecture, trigger is always exactly in the middle of the array
-        const trigSamplePos = samples.length * 0.5;
+        // Target trigger position: locked at index 0 for ETS, 50% center for non-ETS
+        const targetTrigPx = isEts ? 0 : (w * 0.5);
+        const trigSamplePos = isEts ? 0 : (samples.length * 0.5);
 
-        // Determine if this is a decimated Min/Max frame (length exactly 1600)
-        const isDecimated = (samples.length === 1600);
-        
-        // If decimated, we have 800 buckets (1600 samples total, min/max pairs).
-        // Each bucket represents 1 column (pixel).
+        // Determine if this is a decimated Min/Max frame (only in non-ETS mode when length is 1600)
+        const isDecimated = !isEts && (samples.length === 1600);
+
+        // Horizontal pixel scale.
+        // In ETS the frame always spans the full real capture window (samples.length / rateHz),
+        // so we fit the whole frame onto the screen width regardless of user's timePerDiv.
+        // The time labels are drawn from actualEtsWindowSec (see drawLabels).
         const pxPerSample = isDecimated ? (w / (samples.length / 2)) : (w / samples.length);
 
         // Glow effect
@@ -394,8 +482,8 @@
             for (let i = 0; i < samples.length; i += 2) {
                 const x = (i / 2) * pxPerSample;
                 const minV = samples[i];
-                const maxV = samples[i+1];
-                
+                const maxV = samples[i + 1];
+
                 let y1 = h / 2 - ((minV - centerV) / totalVolts) * h;
                 let y2 = h / 2 - ((maxV - centerV) / totalVolts) * h;
 
@@ -417,11 +505,11 @@
                 }
             }
         } else {
-            // Draw Raw
+            // Draw Raw sequential samples (ETS or raw realtime)
             for (let i = 0; i < samples.length; i++) {
                 const x = targetTrigPx + (i - trigSamplePos) * pxPerSample;
-                if (x < -20) continue;
-                if (x > w + 20) break;
+                if (x < -50) continue;
+                if (x > w + 50) break;
 
                 const v = samples[i];
                 const y = h / 2 - ((v - centerV) / totalVolts) * h;
@@ -430,7 +518,7 @@
                     ctx.moveTo(x, y);
                     first = false;
                 } else {
-                    if (Math.abs(y - prevY) > (h * 0.12) && pxPerSample > 2.5) {
+                    if (Math.abs(y - prevY) > (h * 0.05) && pxPerSample > 2.0) {
                         ctx.lineTo(x, prevY);
                         ctx.lineTo(x, y);
                     } else {
@@ -440,7 +528,7 @@
                 prevY = y;
             }
         }
-        
+
         ctx.stroke();
 
         // Reset shadow
@@ -451,13 +539,30 @@
     function drawLabels(w, h) {
         ctx.font = '10px JetBrains Mono, monospace';
 
-        // Time labels at bottom
+        // Time labels at bottom.
+        // In ETS (single-channel) the screen fits the real capture window (samples / rate).
+        // In realtime mode (single OR multi-channel), timePerDiv reflects the actual sample rate directly.
+        const numCh = oscState.multiChannel ? Math.max(1, oscState.activeChannels.length) : 1;
+        const perChRateKHz = oscState.sampleRateKHz;   // per-channel rate requested (multi-mode: ADC interleaves, each channel gets this rate)
+        const isEts = !oscState.multiChannel && perChRateKHz >= 5000;
+        const truePerChRateKHz = isEts ? Math.min(perChRateKHz, 6000) : perChRateKHz;
+        const frameSamples = (oscState.currentFrame && oscState.currentFrame.length > 0) ? oscState.currentFrame.length : 1600;
+        const effTimePerDiv = isEts
+            ? (frameSamples / (truePerChRateKHz * 1000)) / GRID_DIVISIONS_X   // reqRate kHz -> Hz
+            : oscState.timePerDiv;
+
         ctx.fillStyle = 'rgba(148, 163, 184, 0.6)';
         const dx = w / GRID_DIVISIONS_X;
         for (let i = 0; i <= GRID_DIVISIONS_X; i++) {
-            const t = (i - GRID_DIVISIONS_X / 2) * oscState.timePerDiv;
+            let t;
+            if (isEts) {
+                // Trigger is at left edge (index 0) in ETS mode
+                t = i * effTimePerDiv;
+            } else {
+                t = (i - GRID_DIVISIONS_X / 2) * effTimePerDiv;
+            }
             const label = formatTime(Math.abs(t));
-            const prefix = t < 0 ? '-' : (t > 0 ? '' : '');
+            const prefix = (!isEts && t < 0) ? '-' : '';
             ctx.fillText(prefix + label, i * dx + 3, h - 4);
         }
 
@@ -550,7 +655,9 @@
             drawStatusOverlay(w, h);
 
             if (measSamples.length > 10) {
-                const sampleRate = Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) * 1000;
+                const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
+                const rateKHz = isEts ? Math.min(oscState.sampleRateKHz, 6000) : oscState.sampleRateKHz;
+                const sampleRate = rateKHz * 1000;
                 const meas = computeMeasurements(measSamples, sampleRate);
                 updateMeasurementsUI(meas);
             }
@@ -579,7 +686,9 @@
 
             // Update measurements
             if (displaySamples.length > 10) {
-                const sampleRate = oscState.sampleRateKHz * 1000;
+                const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
+                const rateKHz = isEts ? Math.min(oscState.sampleRateKHz, 6000) : oscState.sampleRateKHz;
+                const sampleRate = rateKHz * 1000;
                 const meas = computeMeasurements(displaySamples, sampleRate);
                 updateMeasurementsUI(meas);
             }
@@ -589,8 +698,25 @@
     }
 
     // ======================== Measurements UI ========================
+    let smoothFreq = 0;
+    let smoothDuty = 0;
+
     function updateMeasurementsUI(m) {
         if (!m) return;
+
+        // Reset smoothing if frequency jumps significantly or drops to 0
+        if (m.freq === 0 || smoothFreq === 0 || Math.abs(m.freq - smoothFreq) > smoothFreq * 0.5) {
+            smoothFreq = m.freq;
+        } else {
+            smoothFreq = smoothFreq * 0.8 + m.freq * 0.2;
+        }
+
+        if (m.duty === 0 || smoothDuty === 0 || Math.abs(m.duty - smoothDuty) > 20) {
+            smoothDuty = m.duty;
+        } else {
+            smoothDuty = smoothDuty * 0.8 + m.duty * 0.2;
+        }
+
         const set = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.innerText = val;
@@ -598,8 +724,8 @@
         set('oscVmax', formatVoltage(m.vMax));
         set('oscVmin', formatVoltage(m.vMin));
         set('oscVpp', formatVoltage(m.vPP));
-        set('oscFreq', m.freq > 0 ? (m.freq >= 1000 ? (m.freq / 1000).toFixed(2) + ' kHz' : m.freq.toFixed(1) + ' Hz') : '-- Hz');
-        set('oscPeriod', m.period > 0 ? formatTime(m.period) : '--');
+        set('oscFreq', smoothFreq > 0 ? (smoothFreq >= 1000 ? (smoothFreq / 1000).toFixed(2) + ' kHz' : smoothFreq.toFixed(1) + ' Hz') : '-- Hz');
+        set('oscDuty', smoothDuty > 0 ? smoothDuty.toFixed(1) + ' %' : '-- %');
     }
 
     // ======================== Data Receiver ========================
@@ -617,7 +743,7 @@
         // Parse packets
         while (oscPacketBuffer.length >= 3) {
             const pktType = oscPacketBuffer[0];
-            
+
             // Valid packets: 0x10 (Volt), 0x12 (Osc), 0x20 (Vref), 0x40 (Logic), 0x50 (Comp)
             if (pktType !== 0x10 && pktType !== 0x12 && pktType !== 0x20 && pktType !== 0x40 && pktType !== 0x50) {
                 oscPacketBuffer = oscPacketBuffer.slice(1);
@@ -652,53 +778,56 @@
     }
 
     function processOscData(payload) {
-        // Frame received
-        if (payload.length === 0) return;
-        
+        // Frame layout: [sessionId][chMask][data...]
+        // chMask = 0 for single-channel/ETS (data = one channel); else bitmask of channels.
+        if (payload.length <= 2) return;
+        if (!oscState.running) return;
+
         if (oscState.syncPending) return; // Drop stale frames while waiting for sync
+
+        let frameSessionId = payload[0];
+        if (frameSessionId !== oscState.sessionId) return; // Drop stale frames
+
+        const chMask = payload[1];
+        const dataPayload = payload.slice(2);
 
         // Don't push new data if single-captured
         if (oscState.triggerMode === 'single' && oscState.singleCaptured) return;
 
-        if (oscState.resolution === 12) {
-            const numSamples = Math.floor(payload.length / 2);
-            const frame = new Float64Array(numSamples);
-            const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-            for (let i = 0; i < numSamples; i++) {
-                const raw = view.getUint16(i * 2, true); // Little endian
-                frame[i] = rawToVolts(raw);
-            }
-            if (oscState.multiChannel) {
-                if (!oscState.multiFrames) oscState.multiFrames = [null, null, null, null];
-                let currentCh = oscState.activeChannels[oscState.currentMultiIdx];
-                oscState.multiFrames[currentCh] = frame;
-                oscState.currentMultiIdx = (oscState.currentMultiIdx + 1) % oscState.activeChannels.length;
-                if (oscState.running && oscState.triggerMode !== 'single') {
-                    restartOsc();
-                } else if (oscState.triggerMode === 'single' && oscState.currentMultiIdx === 0) {
-                    oscState.singleCaptured = true;
-                }
+        const bytesPerSample = (oscState.resolution === 12) ? 2 : 1;
+
+        const convertChannel = (bytes, ch) => {
+            const n = Math.floor(bytes.length / bytesPerSample);
+            const f = new Float64Array(n);
+            if (bytesPerSample === 2) {
+                const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                for (let i = 0; i < n; i++) f[i] = rawToVolts(view.getUint16(i * 2, true), ch);
             } else {
-                oscState.currentFrame = frame;
+                for (let i = 0; i < n; i++) f[i] = rawToVolts(bytes[i], ch);
             }
+            return f;
+        };
+
+        if (chMask !== 0 && oscState.multiChannel) {
+            // Multi-channel synchronized frame: channels laid out sequentially
+            const chs = [];
+            for (let i = 0; i < 4; i++) if (chMask & (1 << i)) chs.push(i);
+            if (chs.length === 0) return;
+            const perChBytes = Math.floor(dataPayload.length / chs.length / bytesPerSample) * bytesPerSample;
+            if (!oscState.multiFrames) oscState.multiFrames = [null, null, null, null];
+            for (let k = 0; k < chs.length; k++) {
+                const slice = dataPayload.slice(k * perChBytes, (k + 1) * perChBytes);
+                oscState.multiFrames[chs[k]] = convertChannel(slice, chs[k]);
+            }
+            oscState.framesCollectedInSession = chs.length;
+            if (oscState.triggerMode === 'single') {
+                oscState.singleCaptured = true;
+            }
+            // No restartOsc — firmware continuously streams frames at rateKHz per channel
         } else {
-            const frame = new Float64Array(payload.length);
-            for (let i = 0; i < payload.length; i++) {
-                frame[i] = rawToVolts(payload[i]);
-            }
-            if (oscState.multiChannel) {
-                if (!oscState.multiFrames) oscState.multiFrames = [null, null, null, null];
-                let currentCh = oscState.activeChannels[oscState.currentMultiIdx];
-                oscState.multiFrames[currentCh] = frame;
-                oscState.currentMultiIdx = (oscState.currentMultiIdx + 1) % oscState.activeChannels.length;
-                if (oscState.running && oscState.triggerMode !== 'single') {
-                    restartOsc();
-                } else if (oscState.triggerMode === 'single' && oscState.currentMultiIdx === 0) {
-                    oscState.singleCaptured = true;
-                }
-            } else {
-                oscState.currentFrame = frame;
-            }
+            // Single channel (or legacy) frame
+            const frame = convertChannel(dataPayload, oscState.channel);
+            oscState.currentFrame = frame;
         }
 
         // Update actual rate based on frames received (optional, mostly for debugging)
@@ -708,8 +837,8 @@
             let fps = (oscState.actualRateSamples * 1000) / (now - oscState.actualRateTimestamp);
             oscState.calculatedSampleRate = fps;
             let el = document.getElementById('cfgOscActualRate');
-            if (el) el.innerText = fps.toFixed(1) + " FPS";
-            
+            if (el) el.innerText = fps.toFixed(1) + " Frames/s";
+
             oscState.actualRateSamples = 0;
             oscState.actualRateTimestamp = now;
         }
@@ -724,6 +853,7 @@
         if (btnOscStartStop) {
             btnOscStartStop.addEventListener('click', () => {
                 if (!microTester.device) return alert("Connect USB first!");
+                if (window.Calibration && window.Calibration._calibrationBusy) return alert("Calibration is currently in progress. Please wait until finished.");
 
                 if (oscState.running) {
                     stopOsc();
@@ -846,6 +976,7 @@
                 chs.push(0);
             }
             oscState.activeChannels = chs;
+            const wasMulti = oscState.multiChannel;
             oscState.multiChannel = chs.length > 1;
             oscState.currentMultiIdx = 0;
             if (!oscState.multiChannel) {
@@ -856,7 +987,19 @@
                     oscState.multiFrames[i] = null;
                 }
             }
-            
+            oscState.framesCollectedInSession = 0;
+
+            // Sync warning is obsolete: channels are hardware-synchronized (interleaved scan)
+            const warningEl = document.getElementById('oscDesyncWarning');
+            if (warningEl) {
+                warningEl.style.display = 'none';
+            }
+            // ETS is disabled in multi-channel; re-evaluate allowed rates
+            // (guard: updateSampleRateOptions may not be initialized yet on first call)
+            if (wasMulti !== oscState.multiChannel) {
+                try { updateSampleRateOptions(); } catch (e) { /* TDZ on first boot, ignore */ }
+            }
+
             if (oscState.running) restartOsc();
         };
 
@@ -869,29 +1012,60 @@
         // --- Voltage Range ---
         const cfgOscVoltRange = document.getElementById('cfgOscVoltRange');
         oscState.divider = 21.0;
-        oscState.baseOffsetConfig = 33.0;
         oscState.biasEnabled = true;
 
-        // --- Sample Rate ---
+        // --- Sample Rate & Resolution ---
         const cfgOscSampleRate = document.getElementById('cfgOscSampleRate');
+        const cfgOscResolution = document.getElementById('cfgOscResolution');
+
+        function updateSampleRateOptions() {
+            if (!cfgOscSampleRate) return;
+            const currentVal = parseInt(cfgOscSampleRate.value) || 1000;
+            const is12bit = oscState.resolution === 12;
+            const isMulti = oscState.multiChannel;
+
+            const options = cfgOscSampleRate.options;
+            for (let i = 0; i < options.length; i++) {
+                const rateVal = parseInt(options[i].value);
+                let hide = false;
+                if (is12bit && rateVal > 2800) hide = true;          // 12-bit: cap at 2.8 MHz
+                if (isMulti && rateVal >= 5000) hide = true;         // ETS not available in multi-channel (hardware scan is used)
+                if (hide) {
+                    options[i].style.display = 'none';
+                    options[i].disabled = true;
+                } else {
+                    options[i].style.display = '';
+                    options[i].disabled = false;
+                }
+            }
+
+            let cappedVal = currentVal;
+            if (is12bit && cappedVal > 2800) cappedVal = 2800;
+            if (isMulti && cappedVal >= 5000) cappedVal = 2000;
+            if (cappedVal !== currentVal) {
+                cfgOscSampleRate.value = String(cappedVal);
+                oscState.sampleRateKHz = cappedVal;
+            }
+        }
+
         if (cfgOscSampleRate) {
             cfgOscSampleRate.addEventListener('change', () => {
-                oscState.sampleRateKHz = parseInt(cfgOscSampleRate.value) || 10;
+                oscState.sampleRateKHz = parseInt(cfgOscSampleRate.value) || 1000;
                 if (oscState.running) restartOsc();
             });
         }
 
-        // --- Resolution ---
-        const cfgOscResolution = document.getElementById('cfgOscResolution');
         if (cfgOscResolution) {
             cfgOscResolution.addEventListener('change', () => {
                 oscState.resolution = parseInt(cfgOscResolution.value) || 8;
                 oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
+                updateSampleRateOptions();
                 if (oscState.running) restartOsc();
             });
             // Initial setup
             oscState.resolution = parseInt(cfgOscResolution.value) || 8;
             oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
+            updateSampleRateOptions();
         }
 
         // --- Oversampling ---
@@ -1000,9 +1174,9 @@
         oscState.running = true;
         oscState.singleCaptured = false;
         oscState.frozenWaveform = null;
-        oscState.ringHead = 0;
-        oscState.ringCount = 0;
         oscPacketBuffer = new Uint8Array(0);
+        oscState.sessionId = (oscState.sessionId + 1) % 256;
+        oscState.framesCollectedInSession = 0;
 
         if (btnOscStartStop) {
             btnOscStartStop.innerHTML = '■ Stop';
@@ -1010,17 +1184,22 @@
             btnOscStartStop.classList.add('btn-danger');
         }
 
-        // Send command: [pin, oversample, rateKHz_lo, rateKHz_hi, trigEdge, trigLevel_lo, trigLevel_hi, trigMode, reqSamples_lo, reqSamples_hi, enableBias, bitness12]
+        // Send command: [pinMask, oversample, rateKHz_lo, rateKHz_hi, trigEdge, trigLevel_lo, trigLevel_hi, trigMode, reqSamples_lo, reqSamples_hi, enableBias, bitness12, sessionId, trigCh]
+        // pinMask: bitmask of active channels (bit i = CH i). Trigger happens on `trigCh`.
+        // reqSamples is per-channel when pinMask has >1 bit; total = reqSamples * popcount(pinMask).
         if (oscState.multiChannel) {
             oscState.currentMultiIdx = 0;
             oscState.multiFrames = [null, null, null, null];
         }
-        
-        let reqChannel = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
-        let reqRate = oscState.multiChannel ? Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) : oscState.sampleRateKHz;
-        
-        const payload = new Uint8Array(12);
-        payload[0] = reqChannel;
+
+        const reqChannel = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
+        const pinMask = oscState.multiChannel
+            ? oscState.activeChannels.reduce((m, c) => m | (1 << c), 0)
+            : (1 << oscState.channel);
+        const reqRate = oscState.sampleRateKHz;
+
+        const payload = new Uint8Array(14);
+        payload[0] = pinMask;
         payload[1] = oscState.oversample;
         payload[2] = reqRate & 0xFF;
         payload[3] = (reqRate >> 8) & 0xFF;
@@ -1029,11 +1208,14 @@
 
         // Convert trigger voltage to raw ADC (0-255 for 8-bit mode)
         let trigV = oscState.triggerLevel;
-        if (oscState.baseOffsetConfig > 0) {
-            trigV = (trigV + oscState.baseOffsetConfig) / oscState.divider;
-        } else {
-            trigV = trigV / oscState.divider;
+        let vz = 0;
+        if (window.Calibration) {
+            vz = oscState.biasEnabled ? (window.Calibration.biasOffsets[reqChannel] || 0) : (window.Calibration.zeroOffsets[reqChannel] || 0);
         }
+        if (oscState.biasEnabled && vz === 0) {
+            vz = 33.0 / oscState.divider; // Fallback to theoretical
+        }
+        trigV = (trigV / oscState.divider) + vz;
         let trigRaw = (trigV / oscState.vRef) * oscState.adcRes;
         trigRaw = Math.max(0, Math.min(oscState.adcRes, Math.round(trigRaw)));
 
@@ -1044,20 +1226,31 @@
         const modeMap = { 'auto': 0, 'normal': 1, 'single': 2 };
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
+        const isEtsReq = reqRate >= 5000 && !oscState.multiChannel;
+        const maxHwRate = oscState.resolution === 12 ? 2800 : 3818;
+        const effectiveRateKHz = isEtsReq ? Math.min(reqRate, 6000) : Math.min(reqRate, maxHwRate);
+        const numCh = oscState.multiChannel ? oscState.activeChannels.length : 1;
+
         const totalTime = oscState.timePerDiv * GRID_DIVISIONS_X;
-        const maxRateKHz = oscState.resolution === 12 ? 2800 : 3818;
-        const actualRateKHz = Math.min(reqRate, maxRateKHz);
-        const sampleRate = actualRateKHz * 1000;
+        const perChannelRateKHz = oscState.multiChannel ? (effectiveRateKHz / numCh) : effectiveRateKHz;
+        const sampleRate = perChannelRateKHz * 1000;
         let samplesOnScreen = Math.round(totalTime * sampleRate);
         if (samplesOnScreen < 20) samplesOnScreen = 20;
-        
-        const maxSamples = oscState.resolution === 12 ? 10000 : 20000;
-        if (samplesOnScreen > maxSamples) samplesOnScreen = maxSamples; // MCU memory limit
+
+        const maxSamplesTotal = oscState.resolution === 12 ? 7500 : 15000;
+        const maxSamplesPerCh = Math.floor(maxSamplesTotal / numCh);
+        if (samplesOnScreen > maxSamplesPerCh) samplesOnScreen = maxSamplesPerCh;
 
         payload[8] = samplesOnScreen & 0xFF;
         payload[9] = (samplesOnScreen >> 8) & 0xFF;
         payload[10] = oscState.biasEnabled ? 1 : 0;
         payload[11] = oscState.resolution === 12 ? 1 : 0;
+        payload[12] = oscState.sessionId;
+        payload[13] = reqChannel;  // trigger channel index (for single mode == only channel)
+
+        // Remember what we asked firmware for (used by measurements & decimation logic)
+        oscState.isEts = isEtsReq;
+        oscState.reqSamplesSent = samplesOnScreen;
 
         microTester.sendCommand(CMD_OSC_START, payload);
 
@@ -1087,31 +1280,32 @@
     function restartOsc() {
         if (!oscState.running) return;
         microTester.sendCommand(CMD_OSC_STOP);
-        
-        if (oscState.multiChannel) {
-            oscState.syncPending = true;
-            microTester.sendCommand(0x20); // CMD_GET_VREF as sync token
-        }
-        
-        oscState.ringHead = 0;
-        oscState.ringCount = 0;
 
-        let reqChannel = oscState.multiChannel ? oscState.activeChannels[oscState.currentMultiIdx] : oscState.channel;
-        let reqRate = oscState.multiChannel ? Math.max(1, Math.floor(oscState.sampleRateKHz / oscState.activeChannels.length)) : oscState.sampleRateKHz;
-        
-        const payload = new Uint8Array(12);
-        payload[0] = reqChannel;
+        oscState.sessionId = (oscState.sessionId + 1) % 256;
+        oscState.framesCollectedInSession = 0;
+        oscState.syncPending = false;
+
+        const chs = oscState.multiChannel ? oscState.activeChannels : [oscState.channel];
+        const pinMask = chs.reduce((m, c) => m | (1 << c), 0);
+        const reqChannel = chs[0];  // trigger channel = first active channel in mask order
+        const reqRate = oscState.sampleRateKHz;
+
+        const payload = new Uint8Array(14);
+        payload[0] = pinMask;
         payload[1] = oscState.oversample;
         payload[2] = reqRate & 0xFF;
         payload[3] = (reqRate >> 8) & 0xFF;
 
         payload[4] = oscState.triggerEdge === 'rising' ? 1 : 0;
         let trigV = oscState.triggerLevel;
-        if (oscState.baseOffsetConfig > 0) {
-            trigV = (trigV + oscState.baseOffsetConfig) / oscState.divider;
-        } else {
-            trigV = trigV / oscState.divider;
+        let vz = 0;
+        if (window.Calibration) {
+            vz = oscState.biasEnabled ? (window.Calibration.biasOffsets[reqChannel] || 0) : (window.Calibration.zeroOffsets[reqChannel] || 0);
         }
+        if (oscState.biasEnabled && vz === 0) {
+            vz = 33.0 / oscState.divider; // Fallback to theoretical
+        }
+        trigV = (trigV / oscState.divider) + vz;
         let trigRaw = Math.max(0, Math.min(oscState.adcRes, Math.round((trigV / oscState.vRef) * oscState.adcRes)));
         payload[5] = trigRaw & 0xFF;
         payload[6] = (trigRaw >> 8) & 0xFF;
@@ -1119,27 +1313,45 @@
         const modeMap = { 'auto': 0, 'normal': 1, 'single': 2 };
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
+        const isEtsReq = reqRate >= 5000 && !oscState.multiChannel;
+        const maxHwRate = oscState.resolution === 12 ? 2800 : 3818;
+        const effectiveRateKHz = isEtsReq ? Math.min(reqRate, 6000) : Math.min(reqRate, maxHwRate);
+        const numCh = oscState.multiChannel ? chs.length : 1;
+
         const totalTime = oscState.timePerDiv * GRID_DIVISIONS_X;
-        const maxRateKHz = oscState.resolution === 12 ? 2800 : 3818;
-        const actualRateKHz = Math.min(reqRate, maxRateKHz);
-        const sampleRate = actualRateKHz * 1000;
+        const perChannelRateKHz = oscState.multiChannel ? (effectiveRateKHz / numCh) : effectiveRateKHz;
+        const sampleRate = perChannelRateKHz * 1000;
         let samplesOnScreen = Math.round(totalTime * sampleRate);
         if (samplesOnScreen < 20) samplesOnScreen = 20;
-        
-        const maxSamples = oscState.resolution === 12 ? 10000 : 20000;
-        if (samplesOnScreen > maxSamples) samplesOnScreen = maxSamples;
+
+        const maxSamplesTotal = oscState.resolution === 12 ? 7500 : 15000;
+        const maxSamplesPerCh = Math.floor(maxSamplesTotal / numCh);
+        if (samplesOnScreen > maxSamplesPerCh) samplesOnScreen = maxSamplesPerCh;
 
         payload[8] = samplesOnScreen & 0xFF;
         payload[9] = (samplesOnScreen >> 8) & 0xFF;
         payload[10] = oscState.biasEnabled ? 1 : 0;
         payload[11] = oscState.resolution === 12 ? 1 : 0;
+        payload[12] = oscState.sessionId;
+        payload[13] = reqChannel;
+
+        // Remember what we asked firmware for
+        oscState.isEts = isEtsReq;
+        oscState.reqSamplesSent = samplesOnScreen;
 
         microTester.sendCommand(CMD_OSC_START, payload);
     }
 
     function autoScale() {
-        if (oscState.ringCount < 10) return;
-        const samples = getSamples(oscState.ringCount);
+        let samples;
+        if (oscState.multiChannel) {
+            let activeCh = oscState.activeChannels[oscState.currentMultiIdx] ?? oscState.activeChannels[0];
+            samples = oscState.multiFrames ? oscState.multiFrames[activeCh] : null;
+        } else {
+            samples = oscState.currentFrame;
+        }
+        if (!samples || samples.length < 10) return;
+
         const meas = computeMeasurements(samples, oscState.sampleRateKHz * 1000);
         if (!meas) return;
 

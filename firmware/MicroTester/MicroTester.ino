@@ -1,22 +1,16 @@
 #include "Adafruit_TinyUSB.h"
 #include "protocol.h"
 #include "adc_sampler.h"
-#include "adc_ets.h"
 #include "pwm_gen.h"
-#include "logic_analyzer.h"
 #include "comp_tester.h"
 
-#define CMD_BENCHMARK_START 0x20
-#define CMD_BENCHMARK_STOP  0x21
-
-bool benchmarkMode = false;
 bool oscMode = false; // true = oscilloscope, false = voltmeter
-
-// Benchmark: 2KB buffer, write in big chunk then flush once
-static uint8_t benchBuffer[2048];
 
 // WebUSB object
 Adafruit_USBD_WebUSB usb_web;
+
+// Forward declaration
+void line_state_callback(bool connected);
 
 bool robust_write(const uint8_t* data, uint16_t len) {
     uint16_t written = 0;
@@ -48,18 +42,12 @@ void setup() {
 
   SerialTinyUSB.begin(115200);
 
-  // Fill benchmark buffer with pattern
-  for (int i = 0; i < 2048; i++) {
-    benchBuffer[i] = i & 0xFF;
-  }
-
   // Configure WebUSB
   usb_web.setLineStateCallback(line_state_callback);
   usb_web.begin();
 
   adc_sampler_init();
   pwm_gen_init();
-  logic_analyzer_init();
   comp_tester_init();
 }
 
@@ -99,46 +87,22 @@ void loop() {
     }
     else if (cmd == CMD_GET_VREF) {
       adc_sampler_stop();
-      #if defined(ARDUINO_ARCH_STM32)
-      ADC->CCR |= (1 << 23); // TSVREFE
-      if ((RCC->APB2ENR & RCC_APB2ENR_ADC1EN) == 0) RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-      ADC1->CR1 = 0;
-      ADC1->CR2 = 0;
-      ADC1->SQR3 = 17; // Channel 17 (VREFINT)
-      ADC1->SMPR1 |= (7 << 21); // 480 cycles sampling time for VREFINT
-      ADC1->CR2 |= ADC_CR2_ADON;
-      for(volatile int i=0; i<1000; i++); // stabilize
+      uint32_t sum = adc_sampler_measure_vrefint_sum4096();
       
-      // Throw away first reading
-      ADC1->CR2 |= ADC_CR2_SWSTART;
-      while (!(ADC1->SR & ADC_SR_EOC));
-      uint16_t dump = ADC1->DR;
-      
-      uint32_t sum = 0;
-      for (int i=0; i<16; i++) {
-        ADC1->CR2 |= ADC_CR2_SWSTART;
-        while (!(ADC1->SR & ADC_SR_EOC));
-        sum += ADC1->DR;
-      }
-      uint16_t vref = sum / 16;
-      ADC1->CR2 = 0;
-      ADC->CCR &= ~(1 << 23);
-      #else
-      uint16_t vref = 1500;
-      #endif
-      
-      uint8_t packet[5];
+      uint8_t packet[7];
       packet[0] = PKT_VREF_DATA;
-      packet[1] = 2; // len low
+      packet[1] = 4; // len low
       packet[2] = 0; // len hi
-      packet[3] = vref & 0xFF;
-      packet[4] = (vref >> 8) & 0xFF;
-      robust_write(packet, 5);
+      packet[3] = sum & 0xFF;
+      packet[4] = (sum >> 8) & 0xFF;
+      packet[5] = (sum >> 16) & 0xFF;
+      packet[6] = (sum >> 24) & 0xFF;
+      usb_web.write(packet, 7);
       usb_web.flush();
     }
     else if (cmd == CMD_OSC_START && len >= 10) {
       AdcConfig cfg;
-      cfg.pin = payload[0];
+      cfg.pinMask = payload[0];               // New: bitmask of active channels
       cfg.oversample = payload[1];
       cfg.rateKHz = (uint32_t)payload[2] | ((uint32_t)payload[3] << 8);
       cfg.trigEdge = payload[4];
@@ -148,16 +112,20 @@ void loop() {
       cfg.isOscilloscope = true;
       cfg.enableBias = (len >= 11) ? (payload[10] != 0) : true;
       cfg.bitness12 = (len >= 12) ? (payload[11] != 0) : false;
-      
+      cfg.sessionId = (len >= 13) ? payload[12] : 0;
+      // Trigger channel (for single mode, same as pin; for multi, first set bit)
+      uint8_t pin = 0;
+      for (uint8_t i = 0; i < 4; i++) {
+        if (cfg.pinMask & (1 << i)) { pin = i; break; }
+      }
+      cfg.pin = (len >= 14) ? payload[13] : pin;
+
       oscMode = true;
       adc_sampler_stop();
-      adc_ets_stop();
-      
       adc_sampler_start(cfg);
     }
     else if (cmd == CMD_OSC_STOP) {
       adc_sampler_stop();
-      adc_ets_stop();
       oscMode = false;
     }
     else if (cmd == CMD_SIG_START && len >= 7) {
@@ -174,27 +142,9 @@ void loop() {
     else if (cmd == CMD_SIG_STOP) {
       pwm_gen_stop();
     }
-    else if (cmd == CMD_LOGIC_START && len >= 4) {
-      LogicConfig cfg;
-      uint32_t rateKHz = payload[0] | ((uint32_t)payload[1] << 8);
-      if (rateKHz == 0) rateKHz = 100;
-      cfg.sampleRateHz = rateKHz * 1000;
-      cfg.trigChannel  = payload[2];
-      cfg.trigEdge     = payload[3];
-      cfg.sampleCount  = (len >= 6) ? (payload[4] | ((uint16_t)payload[5] << 8)) : LOGIC_BUFFER_SIZE;
-      logic_analyzer_start(cfg);
-    }
-    else if (cmd == CMD_LOGIC_STOP) {
-      logic_analyzer_stop();
-    }
-    else if (cmd == CMD_BENCHMARK_START) {
-      benchmarkMode = true;
-      adc_sampler_stop();
-    }
-    else if (cmd == CMD_BENCHMARK_STOP) {
-      benchmarkMode = false;
-    }
     else if (cmd == CMD_COMP_TEST) {
+      adc_sampler_stop();
+      oscMode = false;
       uint8_t mode = 0;
       if (len >= 1) mode = payload[0];
       comp_tester_start(mode);
@@ -202,43 +152,23 @@ void loop() {
     else if (cmd == CMD_COMP_STOP) {
       comp_tester_stop();
     }
-  }
-
-  // Benchmark mode: write 2048 bytes then flush once
-  if (benchmarkMode) {
-    if (usb_web.connected()) {
-      usb_web.write(benchBuffer, 2048);
-      usb_web.flush();
+    else if (cmd == CMD_COMP_SET_CAL && len >= 20) {
+      uint16_t vdda_mv = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+      uint16_t rl[3];
+      rl[0] = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
+      rl[1] = (uint16_t)payload[4] | ((uint16_t)payload[5] << 8);
+      rl[2] = (uint16_t)payload[6] | ((uint16_t)payload[7] << 8);
+      uint32_t rh[3];
+      rh[0] = (uint32_t)payload[8] | ((uint32_t)payload[9] << 8) | ((uint32_t)payload[10] << 16) | ((uint32_t)payload[11] << 24);
+      rh[1] = (uint32_t)payload[12] | ((uint32_t)payload[13] << 8) | ((uint32_t)payload[14] << 16) | ((uint32_t)payload[15] << 24);
+      rh[2] = (uint32_t)payload[16] | ((uint32_t)payload[17] << 8) | ((uint32_t)payload[18] << 16) | ((uint32_t)payload[19] << 24);
+      comp_tester_set_cal(vdda_mv, rl, rh);
     }
-    return;
   }
 
-  // 2. Run Sampler & Logic Loops
+  // 2. Run Sampler Loops
   adc_sampler_loop();
-  adc_ets_loop();
-  logic_analyzer_loop();
   comp_tester_loop();
-
-  // 3. Check if ADC buffer is ready to transmit (ETS Mode)
-  if (adc_ets_is_buffer_ready()) {
-    if (usb_web.connected()) {
-      uint16_t sampleCount = ADC_ETS_BUFFER_SIZE;
-      uint16_t payloadSize = sampleCount * 2;
-      uint8_t header[3];
-      header[0] = PKT_OSCILLOSCOPE_DATA;
-      header[1] = payloadSize & 0xFF;
-      header[2] = (payloadSize >> 8) & 0xFF;
-
-      uint16_t* buffer = adc_ets_get_buffer();
-
-      if (robust_write(header, 3) && robust_write((uint8_t*)buffer, payloadSize)) {
-        usb_web.flush();
-      }
-      adc_ets_clear_flag();
-    } else {
-      adc_ets_clear_flag();
-    }
-  }
 
   // 3.5 Check if ADC sampler has data available
   if (oscMode) {
@@ -246,12 +176,19 @@ void loop() {
     uint16_t frameLen;
     if (adc_osc_process_frame(&framePtr, &frameLen)) {
       if (usb_web.connected()) {
+        // Frame payload layout: [sessionId][chMask][data...]
+        // chMask lets host know which channels are present (0 when single-chan ETS).
+        uint8_t chMask = adc_sampler_get_channel_mask();
+        uint16_t totalLen = frameLen + 2;
         uint8_t header[3];
         header[0] = PKT_OSCILLOSCOPE_DATA;
-        header[1] = frameLen & 0xFF;
-        header[2] = (frameLen >> 8) & 0xFF;
+        header[1] = totalLen & 0xFF;
+        header[2] = (totalLen >> 8) & 0xFF;
+        uint8_t meta[2];
+        meta[0] = adc_sampler_get_session_id();
+        meta[1] = chMask;
 
-        if (robust_write(header, 3) && robust_write(framePtr, frameLen)) {
+        if (robust_write(header, 3) && robust_write(meta, 2) && robust_write(framePtr, frameLen)) {
           usb_web.flush();
         }
       }
@@ -275,35 +212,17 @@ void loop() {
     }
   }
 
-  // 4. Check if Logic Analyzer buffer is ready to transmit
-  if (logic_analyzer_is_buffer_ready()) {
-    if (usb_web.connected()) {
-      uint16_t sampleCount = logic_analyzer_get_buffer_size();
-      uint8_t packet[3 + LOGIC_BUFFER_SIZE];
-      packet[0] = PKT_LOGIC_DATA;
-      packet[1] = sampleCount & 0xFF;
-      packet[2] = (sampleCount >> 8) & 0xFF;
-      memcpy(&packet[3], logic_analyzer_get_buffer(), sampleCount);
-
-      if (robust_write(packet, 3 + sampleCount)) {
-        usb_web.flush();
-      }
-      logic_analyzer_clear_flag();
-    } else {
-      logic_analyzer_clear_flag();
-    }
-  }
 
   // 5. Check if Component Tester is done
   if (comp_tester_is_done()) {
     if (usb_web.connected()) {
       CompResult result = comp_tester_get_result();
-      uint8_t packet[19];
+      uint8_t packet[23];
       packet[0] = PKT_COMP_RESULT;
-      packet[1] = 16;
+      packet[1] = sizeof(CompResult);
       packet[2] = 0;
-      memcpy(&packet[3], &result, 16);
-      usb_web.write(packet, 19);
+      memcpy(&packet[3], &result, sizeof(CompResult));
+      usb_web.write(packet, 3 + sizeof(CompResult));
       usb_web.flush();
     } else {
       comp_tester_get_result(); // clear flag
@@ -314,10 +233,7 @@ void loop() {
 void line_state_callback(bool connected) {
   if (!connected) {
     adc_sampler_stop();
-    adc_ets_stop();
     pwm_gen_stop();
-    logic_analyzer_stop();
     comp_tester_stop();
-    benchmarkMode = false;
   }
 }

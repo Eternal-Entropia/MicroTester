@@ -217,11 +217,10 @@
     width: 0%;
 }
 
-/* Support Button */
-.support-btn {
+/* Support & GitHub Fixed Buttons */
+.support-btn, .github-btn {
     position: fixed;
     bottom: 20px;
-    left: 20px;
     z-index: 100;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
@@ -234,8 +233,15 @@
     align-items: center;
     gap: 6px;
     transition: var(--transition);
+    text-decoration: none;
 }
-.support-btn:hover {
+.support-btn {
+    left: 20px;
+}
+.github-btn {
+    right: 20px;
+}
+.support-btn:hover, .github-btn:hover {
     border-color: var(--accent-primary);
     color: var(--text-accent);
 }

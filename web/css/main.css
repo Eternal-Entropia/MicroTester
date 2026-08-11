@@ -522,3 +522,33 @@
     .volt-value { font-size: 48px; }
     .volt-main-row { flex-direction: column; }
 }
+
+/* Circular Knob Slider */
+.knob-container {
+    position: relative;
+    width: 130px;
+    height: 130px;
+    cursor: pointer;
+    touch-action: none;
+    margin-right: 16px;
+}
+.knob-svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+.knob-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    font-size: 20px;
+    font-weight: 600;
+    pointer-events: none;
+    line-height: 1.1;
+}
+.knob-thumb {
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}

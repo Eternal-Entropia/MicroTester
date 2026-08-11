@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const lblSigPeriod = document.getElementById('lblSigPeriod');
     const lblSigTHigh  = document.getElementById('lblSigTHigh');
     const lblSigTLow   = document.getElementById('lblSigTLow');
+    const lblSigResolution    = document.getElementById('lblSigResolution');
+    const lblSigStepPrecision = document.getElementById('lblSigStepPrecision');
     const lblSigStatus = document.getElementById('lblSigStatus');
     const sigGenIndicator = document.getElementById('sigGenIndicator');
     const canvas       = document.getElementById('sigWaveCanvas');
@@ -47,20 +49,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Update Parameters & Waveform Canvas Preview ---
     function updateCalculationsAndPreview() {
         const waveform = parseInt(cfgSigWaveform?.value || '0');
-        const freq = Math.max(1, parseInt(cfgSigFreq?.value || '1000'));
+        const freq = Math.max(1, Math.min(42000000, parseInt(cfgSigFreq?.value || '1000')));
         const duty = (waveform === 0) ? 50 : ((waveform === 2) ? 100 : Math.min(100, Math.max(0, parseInt(cfgSigDuty?.value || '50'))));
 
         // Disable/enable controls based on waveform type
         const isDc = (waveform === 2);
         if (cfgSigFreq) cfgSigFreq.disabled = isDc;
         if (cfgSigFreqRange) cfgSigFreqRange.disabled = isDc;
+        const freqKnob = document.getElementById('freqKnob');
+        if (freqKnob) freqKnob.style.opacity = isDc ? '0.5' : '1';
+        if (freqKnob) freqKnob.style.pointerEvents = isDc ? 'none' : 'auto';
         if (cfgSigDuty) cfgSigDuty.disabled = (waveform === 0 || isDc);
         if (cfgSigDutyRange) cfgSigDutyRange.disabled = (waveform === 0 || isDc);
+
+        // Update Knob UI
+        updateKnobUI(freq);
 
         if (isDc) {
             if (lblSigPeriod) lblSigPeriod.innerText = 'DC';
             if (lblSigTHigh)  lblSigTHigh.innerText  = 'Continuous';
             if (lblSigTLow)   lblSigTLow.innerText   = '0 ms';
+            if (lblSigResolution)    lblSigResolution.innerText    = 'N/A (DC)';
+            if (lblSigStepPrecision) lblSigStepPrecision.innerText = 'N/A';
         } else {
             const periodSec = 1.0 / freq;
             const tHighSec  = periodSec * (duty / 100.0);
@@ -69,6 +79,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (lblSigPeriod) lblSigPeriod.innerText = formatTime(periodSec);
             if (lblSigTHigh)  lblSigTHigh.innerText  = formatTime(tHighSec);
             if (lblSigTLow)   lblSigTLow.innerText   = formatTime(tLowSec);
+
+            // Compute Timer PWM Resolution (STM32 Timer Clock = 84 MHz)
+            const resSteps = Math.max(2, Math.floor(84000000 / freq));
+            const resBits  = Math.log2(resSteps).toFixed(1);
+            const stepPct  = (100.0 / resSteps);
+            const fmtPct   = stepPct < 0.01 ? stepPct.toFixed(4) : (stepPct < 1 ? stepPct.toFixed(2) : stepPct.toFixed(1));
+
+            if (lblSigResolution)    lblSigResolution.innerText    = `${resSteps.toLocaleString()} steps (${resBits} bit)`;
+            if (lblSigStepPrecision) lblSigStepPrecision.innerText = `±${fmtPct}%`;
         }
 
         // Draw Canvas Preview
@@ -160,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const pin      = parseInt(cfgSigPin?.value || '0');
         const waveform = parseInt(cfgSigWaveform?.value || '0');
-        const freq     = Math.max(1, parseInt(cfgSigFreq?.value || '1000'));
+        const freq     = Math.max(1, Math.min(42000000, parseInt(cfgSigFreq?.value || '1000')));
         const duty     = Math.min(100, Math.max(0, parseInt(cfgSigDuty?.value || '50')));
 
         const payload = new Uint8Array(7);
@@ -183,12 +202,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Listeners for Live Inputs ---
     if (cfgSigFreq && cfgSigFreqRange) {
         cfgSigFreq.addEventListener('input', () => {
-            if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(Math.max(1, parseFloat(cfgSigFreq.value) || 1));
+            const freqVal = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq.value) || 1));
+            if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(freqVal);
             updateCalculationsAndPreview();
             if (isRunning) sendSigStart();
         });
         cfgSigFreqRange.addEventListener('input', () => {
-            const freqHz = Math.round(Math.pow(10, parseFloat(cfgSigFreqRange.value)));
+            const freqHz = Math.min(42000000, Math.round(Math.pow(10, parseFloat(cfgSigFreqRange.value))));
             cfgSigFreq.value = freqHz;
             updateCalculationsAndPreview();
             if (isRunning) sendSigStart();
@@ -206,6 +226,72 @@ document.addEventListener('DOMContentLoaded', () => {
             updateCalculationsAndPreview();
             if (isRunning) sendSigStart();
         });
+    }
+
+    // --- Mouse Wheel Adjustment Handlers ---
+    function adjustFreqByWheel(e) {
+        if (cfgSigFreq?.disabled) return;
+        e.preventDefault();
+        const dir = e.deltaY < 0 ? 1 : -1;
+        const isFast = e.shiftKey || e.ctrlKey;
+        const currentFreq = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq?.value || 1000)));
+
+        let step = 1;
+        if (dir > 0) {
+            if (currentFreq < 100) step = 1;
+            else if (currentFreq < 1000) step = 10;
+            else if (currentFreq < 10000) step = 100;
+            else if (currentFreq < 100000) step = 1000;
+            else if (currentFreq < 1000000) step = 10000;
+            else if (currentFreq < 10000000) step = 100000;
+            else step = 1000000;
+        } else {
+            if (currentFreq <= 100) step = 1;
+            else if (currentFreq <= 1000) step = 10;
+            else if (currentFreq <= 10000) step = 100;
+            else if (currentFreq <= 100000) step = 1000;
+            else if (currentFreq <= 1000000) step = 10000;
+            else if (currentFreq <= 10000000) step = 100000;
+            else step = 1000000;
+        }
+
+        if (isFast) step *= 5;
+
+        const newFreq = Math.min(42000000, Math.max(1, currentFreq + dir * step));
+        if (cfgSigFreq) cfgSigFreq.value = newFreq;
+        updateCalculationsAndPreview();
+        if (isRunning) sendSigStart();
+    }
+
+    function adjustDutyByWheel(e) {
+        if (cfgSigDuty?.disabled) return;
+        e.preventDefault();
+        const dir = e.deltaY < 0 ? 1 : -1;
+        const isFast = e.shiftKey || e.ctrlKey;
+        const step = isFast ? 5 : 1;
+        const currentDuty = parseInt(cfgSigDuty?.value || '50');
+        const newDuty = Math.min(100, Math.max(0, currentDuty + dir * step));
+        if (cfgSigDuty) cfgSigDuty.value = newDuty;
+        if (cfgSigDutyRange) cfgSigDutyRange.value = newDuty;
+        updateCalculationsAndPreview();
+        if (isRunning) sendSigStart();
+    }
+
+    if (cfgSigFreq) cfgSigFreq.addEventListener('wheel', adjustFreqByWheel, { passive: false });
+    if (cfgSigFreqRange) cfgSigFreqRange.addEventListener('wheel', adjustFreqByWheel, { passive: false });
+    if (cfgSigDuty) cfgSigDuty.addEventListener('wheel', adjustDutyByWheel, { passive: false });
+    if (cfgSigDutyRange) cfgSigDutyRange.addEventListener('wheel', adjustDutyByWheel, { passive: false });
+
+    if (canvas) {
+        canvas.addEventListener('wheel', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            if (mouseX > rect.width * 0.6 && !cfgSigDuty?.disabled) {
+                adjustDutyByWheel(e);
+            } else {
+                adjustFreqByWheel(e);
+            }
+        }, { passive: false });
     }
 
     if (cfgSigWaveform) {
@@ -228,6 +314,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (val && cfgSigFreq) {
                 cfgSigFreq.value = val;
                 if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(val);
+                updateCalculationsAndPreview();
+                if (isRunning) sendSigStart();
+            }
+        });
+    });
+
+    // Preset Resolution Buttons
+    document.querySelectorAll('.sig-res-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const bits = parseInt(btn.getAttribute('data-res'));
+            if (bits && cfgSigFreq) {
+                const targetSteps = Math.pow(2, bits);
+                const freqHz = Math.round(84000000 / targetSteps);
+                cfgSigFreq.value = freqHz;
+                if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(freqHz);
                 updateCalculationsAndPreview();
                 if (isRunning) sendSigStart();
             }
@@ -269,11 +370,153 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    if (typeof microTester !== 'undefined') {
+        const origDis = microTester.onDisconnect;
+        microTester.onDisconnect = function() {
+            if (origDis) origDis.apply(this, arguments);
+            isRunning = false;
+            if (lblSigStatus) {
+                lblSigStatus.innerText = 'STOPPED';
+                lblSigStatus.className = 'status-badge stopped';
+            }
+            if (sigGenIndicator) sigGenIndicator.classList.remove('active');
+            if (btnSigStart) btnSigStart.disabled = false;
+            if (btnSigStop) btnSigStop.disabled = true;
+        };
+    }
+
     // Expose update function globally
     window.updateSigPreview = updateCalculationsAndPreview;
 
-    // Initial render & resize observer for tab switching / window resize
+    // --- Multi-Turn Knob Slider Logic ---
+    const freqKnob = document.getElementById('freqKnob');
+    const freqKnobFill = document.getElementById('freqKnobFill');
+    const freqKnobThumb = document.getElementById('freqKnobThumb');
+    const freqKnobText = document.getElementById('freqKnobText');
+    
+    let isKnobDragging = false;
+    let lastKnobAngle = 0;
+    const MAX_TURNS = 7.0;
+
+    function freqToTurns(freq) {
+        freq = Math.max(1, Math.min(42000000, freq));
+        if (freq <= 100)        return 0.0 + (freq - 1) / 99;
+        if (freq <= 1000)       return 1.0 + (freq - 100) / 900;
+        if (freq <= 10000)      return 2.0 + (freq - 1000) / 9000;
+        if (freq <= 100000)     return 3.0 + (freq - 10000) / 90000;
+        if (freq <= 1000000)    return 4.0 + (freq - 100000) / 900000;
+        if (freq <= 10000000)   return 5.0 + (freq - 1000000) / 9000000;
+        return 6.0 + (freq - 10000000) / 32000000;
+    }
+
+    function turnsToFreq(turns) {
+        turns = Math.max(0, Math.min(MAX_TURNS, turns));
+        let f;
+        if (turns <= 1.0)      f = 1 + turns * 99;
+        else if (turns <= 2.0) f = 100 + (turns - 1.0) * 900;
+        else if (turns <= 3.0) f = 1000 + (turns - 2.0) * 9000;
+        else if (turns <= 4.0) f = 10000 + (turns - 3.0) * 90000;
+        else if (turns <= 5.0) f = 100000 + (turns - 4.0) * 900000;
+        else if (turns <= 6.0) f = 1000000 + (turns - 5.0) * 9000000;
+        else                   f = 10000000 + (turns - 6.0) * 32000000;
+        return Math.round(f);
+    }
+
+    function updateKnobUI(freq) {
+        if (!freqKnobFill || !freqKnobThumb || !freqKnobText) return;
+        const turns = freqToTurns(freq);
+        let turnFraction = turns % 1.0;
+        if (turns >= MAX_TURNS) turnFraction = turns - Math.floor(turns);
+        
+        // Update SVG (360 degrees total, C = 251.33)
+        const totalDash = 251.33;
+        freqKnobFill.style.strokeDashoffset = totalDash - (turnFraction * totalDash);
+        
+        // Update Thumb (-90 deg to 270 deg)
+        const angle = -90 + (turnFraction * 360);
+        const rad = angle * Math.PI / 180;
+        freqKnobThumb.setAttribute('cx', 50 + 40 * Math.cos(rad));
+        freqKnobThumb.setAttribute('cy', 50 + 40 * Math.sin(rad));
+        
+        // Update Text
+        if (freq >= 1e6) {
+            freqKnobText.innerHTML = (freq / 1e6).toFixed(2) + '<br><span style="font-size:12px; color: #94a3b8">MHz</span>';
+        } else if (freq >= 1e3) {
+            freqKnobText.innerHTML = (freq / 1e3).toFixed(2) + '<br><span style="font-size:12px; color: #94a3b8">kHz</span>';
+        } else {
+            freqKnobText.innerHTML = freq.toFixed(0) + '<br><span style="font-size:12px; color: #94a3b8">Hz</span>';
+        }
+    }
+
+    function handleKnobStart(e) {
+        if (!freqKnob) return;
+        isKnobDragging = true;
+        
+        const rect = freqKnob.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        
+        lastKnobAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
+    }
+
+    function handleKnobMove(e) {
+        if (!isKnobDragging || !freqKnob) return;
+        e.preventDefault();
+        
+        const rect = freqKnob.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        
+        const currentAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
+        let delta = currentAngle - lastKnobAngle;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        
+        lastKnobAngle = currentAngle;
+        
+        const currentFreq = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq?.value || 1000)));
+        let turns = freqToTurns(currentFreq);
+        turns += (delta / 360);
+        
+        const newFreq = turnsToFreq(turns);
+        if (cfgSigFreq) {
+            cfgSigFreq.value = newFreq;
+            cfgSigFreq.dispatchEvent(new Event('input'));
+        }
+    }
+
+    if (freqKnob) {
+        freqKnob.addEventListener('mousedown', (e) => handleKnobStart(e));
+        freqKnob.addEventListener('touchstart', (e) => handleKnobStart(e), {passive: false});
+        
+        document.addEventListener('mousemove', (e) => handleKnobMove(e));
+        document.addEventListener('touchmove', (e) => handleKnobMove(e), {passive: false});
+        
+        document.addEventListener('mouseup', () => { isKnobDragging = false; });
+        document.addEventListener('touchend', () => { isKnobDragging = false; });
+        
+        freqKnob.addEventListener('wheel', adjustFreqByWheel, { passive: false });
+    }
+
+    // Initial render & resize observer for tab switching    // Initialize view
     updateCalculationsAndPreview();
+    
+    // Remaining code intact
+
     setTimeout(updateCalculationsAndPreview, 50);
     setTimeout(updateCalculationsAndPreview, 200);
 
