@@ -1,6 +1,6 @@
 <p align="center">
   <img src="logo.svg" alt="MicroTester Logo" width="320"><br>
-  <strong>Universal MCU-based Test Instrument Suite</strong>
+  <strong>  Universal MCU-based Test Instrument Suite</strong>
 </p>
 
 Turn your microcontroller into a multi-channel oscilloscope, voltmeter, signal generator, and component tester using Chromium based browser 
