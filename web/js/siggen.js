@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update Knob UI
         updateKnobUI(freq);
+        updateDutyKnobPwmUI(duty);
 
         if (isDc) {
             if (lblSigPeriod) lblSigPeriod.innerText = 'DC';
@@ -228,6 +229,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- Debounced USB Update Handler ---
+    let pwmSendTimer = null;
+    function debouncedSendSigStart() {
+        if (!isRunning) return;
+        if (pwmSendTimer) clearTimeout(pwmSendTimer);
+        pwmSendTimer = setTimeout(() => {
+            sendSigStart();
+        }, 300);
+    }
+
     // --- Mouse Wheel Adjustment Handlers ---
     function adjustFreqByWheel(e) {
         if (cfgSigFreq?.disabled) return;
@@ -260,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const newFreq = Math.min(42000000, Math.max(1, currentFreq + dir * step));
         if (cfgSigFreq) cfgSigFreq.value = newFreq;
         updateCalculationsAndPreview();
-        if (isRunning) sendSigStart();
+        debouncedSendSigStart();
     }
 
     function adjustDutyByWheel(e) {
@@ -274,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cfgSigDuty) cfgSigDuty.value = newDuty;
         if (cfgSigDutyRange) cfgSigDutyRange.value = newDuty;
         updateCalculationsAndPreview();
-        if (isRunning) sendSigStart();
+        debouncedSendSigStart();
     }
 
     if (cfgSigFreq) cfgSigFreq.addEventListener('wheel', adjustFreqByWheel, { passive: false });
@@ -448,10 +459,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    let dragTurns = 0;
+
     function handleKnobStart(e) {
         if (!freqKnob) return;
         isKnobDragging = true;
         
+        const currentFreq = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq?.value || 1000)));
+        dragTurns = freqToTurns(currentFreq);
+
         const rect = freqKnob.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
@@ -464,6 +480,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         lastKnobAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
+    }
+
+    function quantizeFreq(freq) {
+        freq = Math.max(1, Math.min(42000000, freq));
+        let step = 1;
+        if (freq < 100)           step = 1;           // 1 - 100 Hz -> 1 Hz
+        else if (freq < 1000)     step = 10;          // 100 - 1000 Hz -> 10 Hz
+        else if (freq < 10000)    step = 100;         // 1 - 10 kHz -> 100 Hz
+        else if (freq < 100000)   step = 1000;        // 10 - 100 kHz -> 1 kHz
+        else if (freq < 1000000)  step = 10000;       // 100 - 1000 kHz -> 10 kHz
+        else if (freq < 10000000) step = 100000;      // 1 - 10 MHz -> 100 kHz
+        else                      step = 1000000;     // 10 - 42 MHz -> 1 MHz
+
+        return Math.min(42000000, Math.max(1, Math.round(freq / step) * step));
     }
 
     function handleKnobMove(e) {
@@ -488,14 +518,15 @@ document.addEventListener('DOMContentLoaded', () => {
         
         lastKnobAngle = currentAngle;
         
-        const currentFreq = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq?.value || 1000)));
-        let turns = freqToTurns(currentFreq);
-        turns += (delta / 360);
+        dragTurns = Math.max(0, Math.min(MAX_TURNS, dragTurns + (delta / 360)));
         
-        const newFreq = turnsToFreq(turns);
-        if (cfgSigFreq) {
+        let newFreq = turnsToFreq(dragTurns);
+        newFreq = quantizeFreq(newFreq);
+
+        if (cfgSigFreq && parseFloat(cfgSigFreq.value) !== newFreq) {
             cfgSigFreq.value = newFreq;
             cfgSigFreq.dispatchEvent(new Event('input'));
+            debouncedSendSigStart();
         }
     }
 
@@ -510,6 +541,108 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('touchend', () => { isKnobDragging = false; });
         
         freqKnob.addEventListener('wheel', adjustFreqByWheel, { passive: false });
+    }
+
+    // --- Duty Cycle Knob Logic (PWM) ---
+    const dutyKnobPwm = document.getElementById('dutyKnobPwm');
+    const dutyKnobFillPwm = document.getElementById('dutyKnobFillPwm');
+    const dutyKnobThumbPwm = document.getElementById('dutyKnobThumbPwm');
+    const dutyKnobTextPwm = document.getElementById('dutyKnobTextPwm');
+
+    let isDutyDraggingPwm = false;
+    let lastDutyAnglePwm = 0;
+
+    function updateDutyKnobPwmUI(duty) {
+        if (!dutyKnobFillPwm || !dutyKnobThumbPwm || !dutyKnobTextPwm) return;
+        const norm = Math.max(0, Math.min(100, duty)) / 100.0;
+        const totalDash = 251.33;
+        dutyKnobFillPwm.style.strokeDashoffset = totalDash - (norm * totalDash);
+
+        const angle = -90 + (norm * 360);
+        const rad = angle * Math.PI / 180;
+        dutyKnobThumbPwm.setAttribute('cx', 50 + 40 * Math.cos(rad));
+        dutyKnobThumbPwm.setAttribute('cy', 50 + 40 * Math.sin(rad));
+
+        dutyKnobTextPwm.innerHTML = Math.round(duty) + '<br><span style="font-size:12px; color: #94a3b8">%</span>';
+
+        if (dutyKnobPwm) {
+            dutyKnobPwm.style.opacity = cfgSigDuty?.disabled ? '0.5' : '1';
+            dutyKnobPwm.style.pointerEvents = cfgSigDuty?.disabled ? 'none' : 'auto';
+        }
+    }
+
+    function handleDutyKnobStartPwm(e) {
+        if (!dutyKnobPwm || cfgSigDuty?.disabled) return;
+        isDutyDraggingPwm = true;
+
+        const rect = dutyKnobPwm.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        lastDutyAnglePwm = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
+    }
+
+    function handleDutyKnobMovePwm(e) {
+        if (!isDutyDraggingPwm || !dutyKnobPwm || cfgSigDuty?.disabled) return;
+        e.preventDefault();
+
+        const rect = dutyKnobPwm.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        const currentAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
+        let delta = currentAngle - lastDutyAnglePwm;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+
+        lastDutyAnglePwm = currentAngle;
+
+        const currentDuty = Math.max(0, Math.min(100, parseFloat(cfgSigDuty?.value || 50)));
+        const newDuty = Math.max(0, Math.min(100, Math.round(currentDuty + delta / 3.6)));
+
+        if (cfgSigDuty && parseFloat(cfgSigDuty.value) !== newDuty) {
+            cfgSigDuty.value = newDuty;
+            cfgSigDuty.dispatchEvent(new Event('input'));
+            debouncedSendSigStart();
+        }
+    }
+
+    if (dutyKnobPwm) {
+        dutyKnobPwm.addEventListener('mousedown', (e) => handleDutyKnobStartPwm(e));
+        dutyKnobPwm.addEventListener('touchstart', (e) => handleDutyKnobStartPwm(e), {passive: false});
+
+        document.addEventListener('mousemove', (e) => handleDutyKnobMovePwm(e));
+        document.addEventListener('touchmove', (e) => handleDutyKnobMovePwm(e), {passive: false});
+
+        document.addEventListener('mouseup', () => { isDutyDraggingPwm = false; });
+        document.addEventListener('touchend', () => { isDutyDraggingPwm = false; });
+
+        dutyKnobPwm.addEventListener('wheel', (e) => {
+            if (cfgSigDuty?.disabled) return;
+            e.preventDefault();
+            const step = e.shiftKey ? 5 : 1;
+            const dir = e.deltaY < 0 ? 1 : -1;
+            const currentDuty = Math.max(0, Math.min(100, parseFloat(cfgSigDuty?.value || 50)));
+            const newDuty = Math.max(0, Math.min(100, currentDuty + dir * step));
+            if (cfgSigDuty) {
+                cfgSigDuty.value = newDuty;
+                cfgSigDuty.dispatchEvent(new Event('input'));
+            }
+        }, { passive: false });
     }
 
     // Initial render & resize observer for tab switching    // Initialize view

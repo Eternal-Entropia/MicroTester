@@ -1,4 +1,4 @@
-<svg width="1000" height="680" xmlns="http://www.w3.org/2000/svg">
+<svg width="1000" height="780" xmlns="http://www.w3.org/2000/svg">
  <defs>
   <!-- Dark EDA Grid Pattern -->
   <pattern id="eda-grid-dark" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="matrix(1,0,0,1,-154,33)">
@@ -208,24 +208,95 @@
    </g>
   </g>
   <g id="svg_136">
-   <text x="19" y="612" fill="#a855f7" font-size="13" font-weight="bold" id="svg_137">[3] SIGNAL GENERATOR OUTPUT (PA8 / PWM / DC)</text>
+   <text x="19" y="612" fill="#a855f7" font-size="13" font-weight="bold">[3] SIGNAL GENERATOR OUTPUT (PA8 / PWM / DC)</text>
    <!-- PA8 Net Tag -->
-   <g id="svg_138">
-    <polygon points="39,632 124,632 139,642 124,652 39,652 " fill="#1e293b" stroke="#a855f7" stroke-width="2" id="svg_139"/>
-    <text x="51" y="646" fill="#a855f7" font-size="11" font-weight="bold" id="svg_140">PA8</text>
+   <g>
+    <polygon points="39,632 124,632 139,642 124,652 39,652 " fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
+    <text x="51" y="646" fill="#a855f7" font-size="11" font-weight="bold">PA8 (PWM)</text>
    </g>
-   <line x1="139" y1="642" x2="219" y2="642" stroke="#22c55e" stroke-width="2.5" id="svg_141"/>
+   <line x1="139" y1="642" x2="219" y2="642" stroke="#22c55e" stroke-width="2.5"/>
    <!-- Resistor R10 (1k) Protection -->
-   <g id="svg_142">
-    <rect x="219" y="630" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_143"/>
-    <text x="246.5" y="625" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_144">R10</text>
-    <text x="246.5" y="646" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_145">1k</text>
+   <g>
+    <rect x="219" y="630" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
+    <text x="246.5" y="625" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R10</text>
+    <text x="246.5" y="646" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">1k</text>
    </g>
-   <line x1="274" y1="642" x2="469" y2="642" stroke="#22c55e" stroke-width="2.5" id="svg_146"/>
+   <line x1="274" y1="642" x2="469" y2="642" stroke="#22c55e" stroke-width="2.5"/>
    <!-- Terminal Flag SIG OUT -->
-   <g id="svg_147">
-    <polygon points="470,629 620,629 635,641 620,653 470,653 " fill="#9333ea" stroke="#a855f7" stroke-width="1.5" id="svg_148"/>
-    <text x="481" y="646" fill="#ffffff" font-size="12" font-weight="bold" id="svg_149">SIG OUT (PA8)</text>
+   <g>
+    <polygon points="470,629 620,629 635,641 620,653 470,653 " fill="#9333ea" stroke="#a855f7" stroke-width="1.5"/>
+    <text x="481" y="646" fill="#ffffff" font-size="12" font-weight="bold">SIG OUT (PA8)</text>
+   </g>
+  </g>
+  
+  <g id="svg_137">
+   <text x="19" y="685" fill="#f43f5e" font-size="13" font-weight="bold">[4] HIGH-FIDELITY SIGNAL GENERATOR / DAC (PB5)</text>
+   
+   <!-- PB5 Net Tag -->
+   <g>
+    <polygon points="39,707 124,707 139,717 124,727 39,727 " fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
+    <text x="51" y="721" fill="#f43f5e" font-size="11" font-weight="bold">PB5 (MOSI)</text>
+   </g>
+   
+   <!-- Wire to R1 -->
+   <line x1="139" y1="717" x2="170" y2="717" stroke="#22c55e" stroke-width="2.5"/>
+   
+   <!-- Resistor R1 (330) -->
+   <g>
+    <rect x="170" y="705" width="45" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
+    <text x="192.5" y="700" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R11</text>
+    <text x="192.5" y="721" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">330</text>
+   </g>
+   
+   <!-- Wire R1 to Node A and R2 -->
+   <line x1="215" y1="717" x2="290" y2="717" stroke="#22c55e" stroke-width="2.5"/>
+   <circle cx="240" cy="717" r="4.5" fill="#ef4444"/>
+   
+   <!-- Capacitor C1 (150pF) -->
+   <g>
+    <line x1="240" y1="717" x2="240" y2="737" stroke="#22c55e" stroke-width="2.5"/>
+    <line x1="225" y1="737" x2="255" y2="737" stroke="#38bdf8" stroke-width="2.5"/>
+    <line x1="225" y1="743" x2="255" y2="743" stroke="#38bdf8" stroke-width="2.5"/>
+    <line x1="240" y1="743" x2="240" y2="757" stroke="#22c55e" stroke-width="2.5"/>
+    <!-- GND -->
+    <line x1="225" y1="757" x2="255" y2="757" stroke="#cbd5e1" stroke-width="2.5"/>
+    <line x1="232" y1="762" x2="248" y2="762" stroke="#cbd5e1" stroke-width="2"/>
+    <line x1="237" y1="767" x2="243" y2="767" stroke="#cbd5e1" stroke-width="1.5"/>
+    
+    <text x="262" y="739" fill="#fbbf24" font-size="11" font-weight="bold">C1</text>
+    <text x="262" y="752" fill="#f8fafc" font-size="10">150pF</text>
+   </g>
+
+   <!-- Resistor R2 (1k) -->
+   <g>
+    <rect x="290" y="705" width="45" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
+    <text x="312.5" y="700" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R12</text>
+    <text x="312.5" y="721" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">1k</text>
+   </g>
+
+   <!-- Wire R2 to Node B and OUT -->
+   <line x1="335" y1="717" x2="470" y2="717" stroke="#22c55e" stroke-width="2.5"/>
+   <circle cx="370" cy="717" r="4.5" fill="#ef4444"/>
+
+   <!-- Capacitor C2 (68pF) -->
+   <g>
+    <line x1="370" y1="717" x2="370" y2="737" stroke="#22c55e" stroke-width="2.5"/>
+    <line x1="355" y1="737" x2="385" y2="737" stroke="#38bdf8" stroke-width="2.5"/>
+    <line x1="355" y1="743" x2="385" y2="743" stroke="#38bdf8" stroke-width="2.5"/>
+    <line x1="370" y1="743" x2="370" y2="757" stroke="#22c55e" stroke-width="2.5"/>
+    <!-- GND -->
+    <line x1="355" y1="757" x2="385" y2="757" stroke="#cbd5e1" stroke-width="2.5"/>
+    <line x1="362" y1="762" x2="378" y2="762" stroke="#cbd5e1" stroke-width="2"/>
+    <line x1="367" y1="767" x2="373" y2="767" stroke="#cbd5e1" stroke-width="1.5"/>
+    
+    <text x="392" y="739" fill="#fbbf24" font-size="11" font-weight="bold">C2</text>
+    <text x="392" y="752" fill="#f8fafc" font-size="10">68pF</text>
+   </g>
+
+   <!-- Terminal Flag SIG OUT -->
+   <g>
+    <polygon points="470,704 620,704 635,717 620,730 470,730 " fill="#e11d48" stroke="#f43f5e" stroke-width="1.5"/>
+    <text x="481" y="721" fill="#ffffff" font-size="12" font-weight="bold">DAC OUT (PB5)</text>
    </g>
   </g>
  </g>

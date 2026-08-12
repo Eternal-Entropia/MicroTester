@@ -112,7 +112,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (voltDivRatioInfo) voltDivRatioInfo.innerText = gainRatio.toFixed(1) + 'x';
 
         // Apply configuration
-        voltConfig.divider = 1.0;    voltConfig.biasEnabled = biasEnabled;
+        voltConfig.divider = gainRatio;
+        voltConfig.gainRatio = gainRatio;
+        voltConfig.biasEnabled = biasEnabled;
         voltConfig.autoPolarity = autoPolarity;
     }
 

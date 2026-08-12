@@ -13,7 +13,4 @@ struct PwmConfig {
 void pwm_gen_init();
 void pwm_gen_start(PwmConfig cfg);
 void pwm_gen_stop();
-bool pwm_gen_is_running();
-PwmConfig pwm_gen_get_config();
-
 #endif // PWM_GEN_H

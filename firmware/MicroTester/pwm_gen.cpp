@@ -122,10 +122,4 @@ void pwm_gen_stop() {
     isRunning = false;
 }
 
-bool pwm_gen_is_running() {
-    return isRunning;
-}
 
-PwmConfig pwm_gen_get_config() {
-    return currentConfig;
-}

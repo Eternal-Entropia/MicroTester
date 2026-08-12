@@ -271,9 +271,12 @@ window.Calibration = {
         let pinVolts = (rawAdc / adcMax) * this.vDda;
         
         let vz = 0;
-        let actualDivider = divider || (biasEnabled ? 21.0 : 11.0);
+        let actualDivider = (divider !== undefined && divider !== null) ? divider : (biasEnabled ? 21.0 : 11.0);
 
-        if (channel >= 0 && channel <= 4) {
+        if (divider === 1.0) {
+             actualDivider = 1.0;
+             vz = 0.0;
+        } else if (channel >= 0 && channel <= 4) {
              actualDivider = biasEnabled ? (this.dividerOn[channel] || 21.0) : (this.dividerOff[channel] || 11.0);
              vz = biasEnabled ? this.biasOffsets[channel] : this.zeroOffsets[channel];
         } else {

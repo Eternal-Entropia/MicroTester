@@ -326,20 +326,6 @@ uint8_t adc_sampler_get_channel_mask() {
 }
 
 #if defined(ARDUINO_ARCH_STM32)
-static inline uint16_t ets_fast_analogRead(uint8_t channel) {
-    if ((RCC->APB2ENR & RCC_APB2ENR_ADC1EN) == 0) {
-        RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-    }
-    if ((ADC1->CR2 & ADC_CR2_ADON) == 0) {
-        ADC1->CR2 |= ADC_CR2_ADON;
-        for(volatile int i=0; i<100; i++);
-    }
-    ADC1->SQR3 = channel;
-    ADC1->CR2 |= ADC_CR2_SWSTART;
-    uint32_t timeout = 10000;
-    while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
-    return (uint16_t)ADC1->DR;
-}
 #endif
 
 void adc_sampler_set_bias(bool enable) {

@@ -1011,8 +1011,25 @@
 
         // --- Voltage Range ---
         const cfgOscVoltRange = document.getElementById('cfgOscVoltRange');
-        oscState.divider = 21.0;
-        oscState.biasEnabled = true;
+        function applyVoltageRangeOsc() {
+            if (!cfgOscVoltRange) return;
+            const sel = cfgOscVoltRange.options[cfgOscVoltRange.selectedIndex];
+            const gainRatio = parseFloat(sel.getAttribute('data-divider')) || 1.0;
+            const biasEnabled = sel.getAttribute('data-bias') === 'true';
+            const autoPolarity = sel.getAttribute('data-autopolarity') === 'true';
+
+            oscState.divider = gainRatio;
+            oscState.biasEnabled = biasEnabled;
+            oscState.autoPolarity = autoPolarity;
+        }
+
+        if (cfgOscVoltRange) {
+            cfgOscVoltRange.addEventListener('change', () => {
+                applyVoltageRangeOsc();
+                if (oscState.running) restartOsc();
+            });
+            applyVoltageRangeOsc();
+        }
 
         // --- Sample Rate & Resolution ---
         const cfgOscSampleRate = document.getElementById('cfgOscSampleRate');

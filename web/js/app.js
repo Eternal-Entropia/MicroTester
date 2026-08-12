@@ -49,6 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.updateSigPreview) {
                 setTimeout(() => window.updateSigPreview(), 20);
             }
+            if (window.updatePwmDacPreview) {
+                setTimeout(() => window.updatePwmDacPreview(), 20);
+            }
             if (window.updateLogicPreview) {
                 setTimeout(() => window.updateLogicPreview(), 20);
             }

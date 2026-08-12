@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include "adc_sampler.h"
 #include "pwm_gen.h"
+#include "sigma_delta_dac.h"
 #include "comp_tester.h"
 
 bool oscMode = false; // true = oscilloscope, false = voltmeter
@@ -48,6 +49,7 @@ void setup() {
 
   adc_sampler_init();
   pwm_gen_init();
+  sigma_delta_dac_init();
   comp_tester_init();
 }
 
@@ -142,6 +144,37 @@ void loop() {
     else if (cmd == CMD_SIG_STOP) {
       pwm_gen_stop();
     }
+    else if (cmd == CMD_SIGMA_DELTA_START && len >= 3) {
+      uint8_t pin = payload[0];
+      uint16_t bufLen = (uint16_t)payload[1] | ((uint16_t)payload[2] << 8);
+      
+      sigma_delta_dac_prepare(pin, bufLen);
+
+      const uint8_t* bitstream = (len > 3) ? &payload[3] : NULL;
+      uint16_t initialLen = (len > 3) ? (len - 3) : 0;
+      if (initialLen > 0) {
+        sigma_delta_dac_write_chunk(0, bitstream, initialLen);
+      }
+      
+      if (initialLen >= bufLen) {
+        sigma_delta_dac_play();
+      }
+    }
+    else if (cmd == CMD_SIGMA_DELTA_DATA && len >= 2) {
+      uint16_t offset = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+      const uint8_t* data = (len > 2) ? &payload[2] : NULL;
+      uint16_t chunkLen = (len > 2) ? (len - 2) : 0;
+      if (chunkLen > 0) {
+        sigma_delta_dac_write_chunk(offset, data, chunkLen);
+      }
+      
+      if (offset + chunkLen >= sigma_delta_dac_get_buf_len()) {
+        sigma_delta_dac_play();
+      }
+    }
+    else if (cmd == CMD_SIGMA_DELTA_STOP) {
+      sigma_delta_dac_stop();
+    }
     else if (cmd == CMD_COMP_TEST) {
       adc_sampler_stop();
       oscMode = false;
@@ -234,6 +267,7 @@ void line_state_callback(bool connected) {
   if (!connected) {
     adc_sampler_stop();
     pwm_gen_stop();
+    sigma_delta_dac_stop();
     comp_tester_stop();
   }
 }
