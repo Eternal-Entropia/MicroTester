@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://eternal-entropia.github.io/MicroTester/web/start.html"><img src="logo.svg" alt="MicroTester Logo" width="320"><br>
-  <strong>MCU-based Instrument Suite                                 </strong>
+  <strong>MCU-based Instrument Suite</strong>
 </p>
 
 Turn your microcontroller into a multi-channel oscilloscope, voltmeter, signal generator, and component tester using Chromium based browser 
