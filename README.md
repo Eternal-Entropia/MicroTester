@@ -30,7 +30,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 | **STM32F401** | Black Pill | 84MHz • 12-bit ADC | **Available Now** |
 | **STM32F103** | Blue Pill | 72MHz • 12-bit ADC | Coming Soon |
 | **RP2040** | Raspberry Pi Pico | 133MHz • 12-bit ADC | Coming Soon |
-| **ESP32-S3** | Dual Core | 240MHz • 12-bit ADC | Coming Soon |
+| **ESP32-S3** | Heltec v3 | 240MHz • 12-bit ADC | Coming Soon |
 
 ## Getting Started
 
