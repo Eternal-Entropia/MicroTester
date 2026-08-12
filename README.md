@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://eternal-entropia.github.io/MicroTester/web/start.html"><img src="logo.svg" alt="MicroTester Logo" width="265"><br>
+  <a href="https://eternal-entropia.github.io/MicroTester/web/start.html"><img src="logo.svg" alt="MicroTester Logo" width="320"><br>
   <strong>MCU-based Instrument Suite</strong>
 </p>
 
