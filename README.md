@@ -15,7 +15,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
 - **Signal Generator**: Programmable PWM signal generation and waveform outputs.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
-  - **Resistors**: 0.1 Ω .. 1 MΩ
+  - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
   - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
   - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
@@ -48,3 +48,5 @@ beta v2.1: fix pinout for component tester
 
 beta v3: Added new calibration. fix bugs. added bugs. now component tester measures mosfet
 ETS work on aliasing signals.
+
+beta v4: added Signal generator. update design. added 3.3v in voltage range
