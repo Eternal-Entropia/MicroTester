@@ -52,5 +52,7 @@ ETS work on aliasing signals.
 beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
 
 
+
 Lib usage in project:
+
 usbdfu: https://github.com/devanlai/webdfu
