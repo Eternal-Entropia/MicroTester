@@ -13,7 +13,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 - **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
-- **Signal Generator**: Programmable PWM signal generation and waveform outputs.
+- **Signal Generator**: Programmable PWM and sine,sawtooth signal generation.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
@@ -49,4 +49,4 @@ beta v2.1: fix pinout for component tester
 beta v3: Added new calibration. fix bugs. added bugs. now component tester measures mosfet
 ETS work on aliasing signals.
 
-beta v4: added Signal generator. update design. added 3.3v in voltage range
+beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
