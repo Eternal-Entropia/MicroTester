@@ -52,7 +52,7 @@ ETS work on aliasing signals.
 
 beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
 
-beta v5: added PWA and icon. added inductors in component tester. minor fix
+beta v5: added PWA, DFU flasher and icon. added inductors in component tester. minor fix
 
 
 Lib usage in project:
