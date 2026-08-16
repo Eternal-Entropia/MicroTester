@@ -5,6 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MicroTester Beta</title>
+    <link rel="icon" type="image/svg+xml" href="img/icon.svg">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="stylesheet" href="css/common.css">
     <link rel="stylesheet" href="css/start.css">
 </head>
@@ -74,7 +80,7 @@
      Modal: Flash MCU
      =============================== -->
 <div class="modal-overlay" id="modalFlash">
-    <div class="modal" style="width: 820px;">
+    <div class="modal" style="width: 1000px; max-width: 95vw;">
         <div class="modal-header">
             <h3 id="flashModalTitle">Flash - STM32F401</h3>
             <button class="modal-close" data-close="modalFlash">&times;</button>
@@ -83,39 +89,52 @@
         <div class="flash-content">
             <!-- Wiring Diagram -->
             <div class="flash-image" id="flashSchematicContainer" style="background: #0b1120; cursor: pointer; border: 1px solid #1e293b; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center;" title="Click to enlarge schematic">
-                <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; max-height: 350px; pointer-events: none;">
-                    <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; max-height: 350px; pointer-events: none;" />
+                <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; max-height: 520px; pointer-events: none;">
+                    <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; max-height: 520px; pointer-events: none;" />
                 </object>
                 <span class="text-xs" style="margin-top: 8px; font-size: 11px; color: #38bdf8; font-weight: bold;">🔍 Click schematic to open full screen zoom</span>
             </div>
 
             <!-- Flash Options -->
             <div class="flash-actions">
-                <div class="flash-option disabled" id="optFlashWebUSB" style="opacity: 0.4; cursor: not-allowed; pointer-events: none; filter: grayscale(100%); background: #1e293b; border-color: #334155;">
-                    <div class="flash-option-title" style="color: #94a3b8;">⚡ Flash via WebUSB</div>
-                    <div class="flash-option-desc" style="color: #64748b;">
-                        Flash firmware directly from browser (DFU mode required)
-                    </div>
+                <!-- DFU Instructions Card -->
+                <div style="padding: 10px 14px; border-radius: 8px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); margin-bottom: 12px;">
+                    <div style="font-weight: 700; font-size: 12px; color: #38bdf8; margin-bottom: 4px;">📌 How to enter DFU Mode on STM32:</div>
+                    <ol style="margin: 0; padding-left: 18px; font-size: 11px; color: #94a3b8; line-height: 1.5;">
+                        <li>Connect <b>BOOT0</b> pin to <b>3.3V</b> (or hold <b>BOOT</b> button on BlackPill).</li>
+                        <li>Press & release <b>NRST</b> reset button (or plug in USB).</li>
+                        <li>Click <b>Flash via WebUSB</b> below & select <b>STM32 BOOTLOADER</b>.</li>
+                    </ol>
                 </div>
-                <div class="flash-option disabled" id="optDownloadBin" style="opacity: 0.4; cursor: not-allowed; pointer-events: none; filter: grayscale(100%); background: #1e293b; border-color: #334155;">
-                    <div class="flash-option-title" style="color: #94a3b8;">📥 Download Binary</div>
-                    <div class="flash-option-desc" style="color: #64748b;">
-                        Download .bin file and flash manually with STM32CubeProgrammer or other tools
+
+                <div class="flash-option" id="optFlashWebUSB" style="cursor: pointer; background: rgba(56, 189, 248, 0.1); border: 1px solid #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);">
+                    <div class="flash-option-title" style="color: #38bdf8; font-size: 15px; font-weight: 700;">⚡ Flash via WebUSB (DFU Mode)</div>
+                    <div class="flash-option-desc" style="color: #94a3b8; font-size: 12px; margin-top: 2px;">
+                        Direct firmware programming over WebUSB (Select binary file or prebuilt .bin)
                     </div>
                 </div>
 
-                <!-- Compile Requirement Notice -->
-                <div style="margin-top: 12px; padding: 12px; border-radius: 8px; background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; text-align: center;">
-                    <span style="font-size: 13px; color: #fbbf24; font-weight: 600; display: block; letter-spacing: 0.3px;">⚠️ please compile with arduino ide</span>
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button class="start-btn start-btn-secondary" id="btnSelectCustomBin" style="flex: 1; padding: 8px; font-size: 12px; height: auto;">
+                        📁 Select Custom .bin File
+                    </button>
+                    <input type="file" id="dfuFileInput" accept=".bin" style="display: none;">
+                </div>
+
+                <div class="flash-option" id="optDownloadBin" style="margin-top: 10px; cursor: pointer; background: #1e293b; border: 1px solid #334155;">
+                    <div class="flash-option-title" style="color: #cbd5e1; font-size: 13px;">📥 Download Source Code / Instructions</div>
+                    <div class="flash-option-desc" style="color: #64748b; font-size: 11px;">
+                        Open GitHub repository to view firmware code and Arduino compile instructions
+                    </div>
                 </div>
 
                 <!-- Progress -->
-                <div class="flash-progress" id="flashProgress">
-                    <div class="text-sm">
-                        <span id="flashStatusText">Connecting...</span>
+                <div class="flash-progress" id="flashProgress" style="margin-top: 14px;">
+                    <div class="text-sm" style="margin-bottom: 6px;">
+                        <span id="flashStatusText" style="color: #38bdf8; font-weight: 600;">Connecting to DFU Device...</span>
                     </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="flashProgressFill"></div>
+                    <div class="progress-bar" style="height: 8px; background: rgba(0,0,0,0.4); border-radius: 4px; overflow: hidden;">
+                        <div class="progress-fill" id="flashProgressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #3b82f6); transition: width 0.2s;"></div>
                     </div>
                 </div>
             </div>
@@ -136,7 +155,6 @@
             <p class="text-sm" style="margin-bottom: 16px; color: var(--text-secondary);">
                 MicroTester is an open-source project. If you find it useful, consider supporting development!
             </p>
-            <!-- Add your own support links/content here -->
             <div class="card" style="margin-bottom: 12px;">
                 <p class="text-sm text-muted">
                     Ethereum: 0xBA1e128A78774Ad5141f28A40be07DD64b3Bd8A5<br>
@@ -154,14 +172,14 @@
      Modal: Schematic Zoom Lightbox
      =============================== -->
 <div class="modal-overlay" id="modalSchematicZoom">
-    <div class="modal" style="width: 95vw; max-width: 1200px; max-height: 90vh; background: #0f172a; border: 1px solid #1e293b; padding: 16px;">
-        <div class="modal-header" style="border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px;">
+    <div class="modal" style="width: 98vw; max-width: 1600px; height: 94vh; max-height: 95vh; background: #0f172a; border: 1px solid #1e293b; padding: 16px; display: flex; flex-direction: column;">
+        <div class="modal-header" style="border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px; flex-shrink: 0;">
             <h3 style="color: #38bdf8; font-size: 16px; margin: 0;">🔍 Full Resolution Schematic Diagram</h3>
             <button class="modal-close" data-close="modalSchematicZoom" style="color: #94a3b8;">&times;</button>
         </div>
-        <div style="width: 100%; height: 75vh; overflow: auto; text-align: center; background: #0b1120; display: flex; justify-content: center; align-items: center;">
-            <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; min-width: 900px; height: 100%; pointer-events: none;">
-                <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; min-width: 900px; height: 100%; pointer-events: none;" />
+        <div style="width: 100%; flex: 1; overflow: auto; text-align: center; background: #0b1120; display: flex; justify-content: center; align-items: center; border-radius: 8px; border: 1px solid #1e293b; padding: 10px;">
+            <object type="image/svg+xml" data="img/stm32f401.svg" style="width: 100%; min-width: 1200px; height: 100%; min-height: 750px; pointer-events: none;">
+                <embed src="img/stm32f401.svg" type="image/svg+xml" style="width: 100%; min-width: 1200px; height: 100%; min-height: 750px; pointer-events: none;" />
             </object>
         </div>
     </div>
@@ -178,12 +196,13 @@
     GitHub
 </a>
 
+<script src="js/dfu.js"></script>
+<script src="js/dfuse.js"></script>
 <script>
     // ============================================================
     // Start Page Logic
     // ============================================================
 
-    // --- Modal helpers ---
     function openModal(id) {
         document.getElementById(id).classList.add('active');
     }
@@ -191,14 +210,12 @@
         document.getElementById(id).classList.remove('active');
     }
 
-    // Close buttons
     document.querySelectorAll('.modal-close').forEach(btn => {
         btn.addEventListener('click', () => {
             closeModal(btn.dataset.close);
         });
     });
 
-    // Click outside modal to close
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) {
@@ -207,23 +224,20 @@
         });
     });
 
-    // --- Quick Start ---
     document.getElementById('btnQuickStart').addEventListener('click', () => {
         openModal('modalMcuSelect');
     });
 
-    // --- Already Flashed ---
     document.getElementById('btnAlreadyFlashed').addEventListener('click', () => {
         window.location.href = 'main.html';
     });
 
-    // --- Support ---
     document.getElementById('btnSupport').addEventListener('click', () => {
         openModal('modalSupport');
     });
 
-    // --- MCU Card Selection ---
-    let selectedMcu = '';
+    let selectedMcu = 'stm32f401';
+    let loadedBinBuffer = null;
 
     document.querySelectorAll('.mcu-card').forEach(card => {
         card.addEventListener('click', () => {
@@ -236,7 +250,6 @@
                 'esp32s3':   'ESP32-S3'
             };
 
-            // Update flash modal
             const titleElem = document.getElementById('flashModalTitle');
             if (titleElem) {
                 titleElem.textContent = `Flash - ${names[selectedMcu] || selectedMcu}`;
@@ -247,7 +260,6 @@
         });
     });
 
-    // --- Click schematic to open full resolution zoom ---
     const flashSchematicContainer = document.getElementById('flashSchematicContainer');
     if (flashSchematicContainer) {
         flashSchematicContainer.addEventListener('click', () => {
@@ -255,41 +267,237 @@
         });
     }
 
-    // --- Flash via WebUSB (placeholder) ---
+    // --- Custom File Picker ---
+    const btnSelectCustomBin = document.getElementById('btnSelectCustomBin');
+    const dfuFileInput = document.getElementById('dfuFileInput');
+
+    if (btnSelectCustomBin && dfuFileInput) {
+        btnSelectCustomBin.addEventListener('click', () => {
+            dfuFileInput.click();
+        });
+
+        dfuFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                loadedBinBuffer = evt.target.result;
+                btnSelectCustomBin.textContent = `📁 File: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+                btnSelectCustomBin.style.borderColor = '#22c55e';
+                btnSelectCustomBin.style.color = '#4ade80';
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    // --- WebUSB ST DFU Flashing via devanlai/webdfu ---
     document.getElementById('optFlashWebUSB').addEventListener('click', async () => {
         const progress = document.getElementById('flashProgress');
         const statusText = document.getElementById('flashStatusText');
         const fill = document.getElementById('flashProgressFill');
 
         progress.classList.add('active');
-        statusText.textContent = 'Requesting USB device...';
-        fill.style.width = '10%';
+        statusText.style.color = '#38bdf8';
+        statusText.textContent = 'Connecting to ST DFU device...';
+        fill.style.width = '5%';
 
         try {
-            // In a real implementation, this would use WebUSB DFU
-            // For now, show the flow
-            statusText.textContent = 'This feature requires DFU mode. Please use binary download.';
+            // 1. Request USB Device
+            const usbDevice = await navigator.usb.requestDevice({
+                filters: [
+                    { vendorId: 0x0483, productId: 0xdf11 },
+                    { vendorId: 0x0483 }
+                ]
+            });
+
+            // 2. Find DFU interfaces using devanlai webdfu
+            let interfaces = dfu.findDeviceDfuInterfaces(usbDevice);
+            if (!interfaces || interfaces.length === 0) {
+                for (let conf of usbDevice.configurations) {
+                    for (let intf of conf.interfaces) {
+                        for (let alt of intf.alternates) {
+                            if (alt.interfaceClass === 0xFE && alt.interfaceSubclass === 0x01) {
+                                interfaces.push({
+                                    "configuration": conf,
+                                    "interface": intf,
+                                    "alternate": alt,
+                                    "name": alt.interfaceName
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!interfaces || interfaces.length === 0) {
+                throw new Error("No DFU interface found on device. Make sure BOOT0=1 and reset MCU.");
+            }
+
+            // 3. Open as basic dfu.Device first to read descriptors (like official demo)
+            let baseDevice = new dfu.Device(usbDevice, interfaces[0]);
+            await baseDevice.open();
+
+            // 4. Read interface names if missing
+            if (interfaces.some(intf => (intf.name == null))) {
+                try {
+                    let mapping = await baseDevice.readInterfaceNames();
+                    if (mapping) {
+                        for (let intf of interfaces) {
+                            if (intf.name === null) {
+                                let configIndex = intf.configuration.configurationValue;
+                                let intfNumber = intf["interface"].interfaceNumber;
+                                let alt = intf.alternate.alternateSetting;
+                                if (mapping[configIndex] && mapping[configIndex][intfNumber]) {
+                                    intf.name = mapping[configIndex][intfNumber][alt];
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { console.log("Could not read interface names:", e); }
+            }
+
+            // 5. Read DFU functional descriptor for TransferSize
+            let transferSize = 2048;
+            let manifestationTolerant = true;
+            try {
+                let configData = await baseDevice.readConfigurationDescriptor(0);
+                let configDesc = dfu.parseConfigurationDescriptor(configData);
+                for (let desc of configDesc.descriptors) {
+                    if (desc.bDescriptorType === 0x21 && desc.hasOwnProperty("bcdDFUVersion")) {
+                        transferSize = desc.wTransferSize || 2048;
+                        manifestationTolerant = (desc.bmAttributes & 0x04) !== 0;
+                        break;
+                    }
+                }
+            } catch (e) { console.log("Could not read DFU descriptor:", e); }
+
+            await baseDevice.close();
+
+            // 6. Ensure interface name has memory descriptor
+            let ifaceSetting = interfaces[0];
+            if (!ifaceSetting.name || !ifaceSetting.name.startsWith("@")) {
+                ifaceSetting.name = "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,03*128Kg";
+            }
+
+            // 7. Create DfuSe device
+            let dfuDevice = new dfuse.Device(usbDevice, ifaceSetting);
+
+            // 8. Prepare binary buffer (Local with GitHub fallback)
+            let binBuffer = loadedBinBuffer;
+            if (!binBuffer) {
+                const firmwareUrls = [
+                    'firmware/MicroTester_STM32F401.bin',
+                    'firmware/Microtester_STM32F401.bin',
+                    '/firmware/MicroTester_STM32F401.bin',
+                    '/firmware/Microtester_STM32F401.bin',
+                    '../firmware/MicroTester_STM32F401.bin',
+                    'https://raw.githubusercontent.com/Eternal-Entropia/MicroTester/main/web/firmware/MicroTester_STM32F401.bin',
+                    'https://raw.githubusercontent.com/Eternal-Entropia/MicroTester/main/firmware/MicroTester_STM32F401.bin',
+                    'https://raw.githubusercontent.com/Eternal-Entropia/MicroTester/main/firmware/Microtester_STM32F401.bin',
+                    'https://raw.githubusercontent.com/Eternal-Entropia/MicroTester/main/firmware/MicroTester/build/STMicroelectronics.stm32.GenF4/MicroTester.ino.bin'
+                ];
+
+                for (const url of firmwareUrls) {
+                    try {
+                        const isRemote = url.startsWith('http');
+                        statusText.textContent = `Fetching firmware binary (${isRemote ? 'GitHub' : 'local'})...`;
+                        const resp = await fetch(url, { cache: 'no-cache' });
+                        if (resp.ok) {
+                            const buf = await resp.arrayBuffer();
+                            if (buf && buf.byteLength > 1024) {
+                                binBuffer = buf;
+                                console.log(`[DFU] Successfully loaded firmware from ${url} (${buf.byteLength} bytes)`);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`[DFU] Could not fetch firmware from ${url}:`, e);
+                    }
+                }
+            }
+
+            if (!binBuffer) {
+                statusText.textContent = 'Could not download firmware. Please select .bin file manually!';
+                fill.style.width = '0%';
+                dfuFileInput.click();
+                return;
+            }
+
+            // 9. Setup progress callbacks
+            dfuDevice.logProgress = (done, total) => {
+                if (total) {
+                    const pct = done / total;
+                    statusText.textContent = `Flashing firmware... ${Math.round(pct * 100)}%`;
+                    fill.style.width = `${Math.round(pct * 100)}%`;
+                }
+            };
+            dfuDevice.logInfo = (msg) => {
+                statusText.textContent = msg;
+            };
+            dfuDevice.logDebug = (msg) => {
+                console.log("[DFU]", msg);
+            };
+            dfuDevice.logWarning = (msg) => {
+                console.warn("[DFU]", msg);
+            };
+            dfuDevice.logError = (msg) => {
+                console.error("[DFU]", msg);
+            };
+
+            // 10. Open DfuSe device and clear any stale error state
+            await dfuDevice.open();
+
+            try {
+                let status = await dfuDevice.getStatus();
+                if (status.state == dfu.dfuERROR) {
+                    await dfuDevice.clearStatus();
+                }
+            } catch (e) {
+                console.log("Initial status clear:", e);
+            }
+
+            // 11. Set start address
+            dfuDevice.startAddress = 0x08000000;
+            try {
+                let flashSeg = dfuDevice.getFirstWritableSegment();
+                if (flashSeg && !isNaN(flashSeg.start)) {
+                    dfuDevice.startAddress = flashSeg.start;
+                }
+            } catch (e) {
+                dfuDevice.startAddress = 0x08000000;
+            }
+
+            // 12. Flash firmware
+            statusText.textContent = 'Erasing & programming firmware via DfuSe...';
+            await dfuDevice.do_download(transferSize, binBuffer, manifestationTolerant);
+
+            statusText.style.color = '#4ade80';
+            statusText.textContent = '🎉 Flashing Successful! Disconnect BOOT0 & click Already Flashed.';
             fill.style.width = '100%';
+
+            setTimeout(() => {
+                if (confirm("Firmware flashed successfully! Open MicroTester now?")) {
+                    window.location.href = "main.html";
+                }
+            }, 1000);
+
         } catch (err) {
-            statusText.textContent = `Error: ${err.message}`;
+            statusText.style.color = '#ef4444';
+            statusText.textContent = `Error: ${err.message || err}`;
+            fill.style.width = '0%';
+            console.error(err);
         }
     });
 
-    // --- Download Binary ---
-    document.getElementById('optDownloadBin').addEventListener('click', () => {
-        // In production, link to actual binary files
-        const urls = {
-            'stm32f103': 'firmware/stm32f103/MicroTester_STM32F103.bin',
-            'stm32f401': 'firmware/stm32f401/MicroTester_STM32F401.bin',
-            'rp2040':    'firmware/rp2040/MicroTester_RP2040.uf2',
-            'esp32s3':   'firmware/esp32s3/MicroTester_ESP32S3.bin'
-        };
-
-        if (urls[selectedMcu]) {
-            alert(`Download: ${urls[selectedMcu]}\n\n(Binary file not yet built. Compile the firmware from source.)`);
-            // In production: window.location.href = urls[selectedMcu];
-        }
-    });
+    // --- Register PWA Service Worker ---
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then((reg) => console.log('[PWA] Service Worker registered successfully:', reg.scope))
+                .catch((err) => console.warn('[PWA] Service Worker registration failed:', err));
+        });
+    }
 </script>
 
 </body>
