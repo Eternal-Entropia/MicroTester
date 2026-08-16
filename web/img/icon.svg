@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Bright Electric Blue T Gradient (No Darkening) -->
+    <linearGradient id="tGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7dd3fc" />
+      <stop offset="50%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0ea5e9" />
+    </linearGradient>
+
+    <!-- Ambient Radial Glow -->
+    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4" />
+      <stop offset="60%" stop-color="#38bdf8" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Soft Glow Filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- App Icon Base Card -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="8" />
+
+  <!-- Ambient Glow Behind T -->
+  <circle cx="256" cy="256" r="200" fill="url(#glowGrad)" />
+
+  <!-- Bright Vivid Blue Letter T -->
+  <path d="M 116 128
+           H 396
+           C 409 128 418 137 418 150
+           V 184
+           C 418 197 409 206 396 206
+           H 296
+           V 382
+           C 296 395 287 404 274 404
+           H 238
+           C 225 404 216 395 216 382
+           V 206
+           H 116
+           C 103 206 94 197 94 184
+           V 150
+           C 94 137 103 128 116 128 Z"
+        fill="url(#tGrad)"
+        filter="url(#neonGlow)" />
+        
+  <!-- Specular Top Highlight -->
+  <path d="M 124 136
+           H 388
+           C 396 136 402 142 402 150
+           V 156
+           C 402 149 396 143 388 143
+           H 124
+           C 116 143 110 149 110 156
+           V 150
+           C 110 142 116 136 124 136 Z"
+        fill="#ffffff"
+        opacity="0.45" />
+</svg>

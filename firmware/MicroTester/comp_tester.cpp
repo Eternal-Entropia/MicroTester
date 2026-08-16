@@ -78,6 +78,7 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB);
 static uint16_t measure_rdson(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
 static uint16_t measure_vth(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
 static bool test_mosfet_channel(uint8_t g, uint8_t d, uint8_t s, bool is_nch, uint16_t* out_vth, uint16_t* out_rds);
+static bool measure_inductor(uint8_t pA, uint8_t pB, uint32_t r_dc_ohm100, uint32_t* out_uH, uint32_t* out_freq_hz);
 
 static void set_probe_hiz(uint8_t p) {
     pinMode(probes[p].rl_pin, INPUT);
@@ -225,10 +226,14 @@ static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16
         }
         if (out_vbe) *out_vbe = (v_b > v_e) ? ((uint32_t)(v_b - v_e) * (uint32_t)vdda_mv / 4096) : 0;
     } else {
-        uint32_t drop_b_pnp = 4096 - v_b;
-        if (drop_b_pnp > 0) {
+        // PNP: base is pulled to GND via RH_B, so base current flows OUT of the
+        // base and I_B = v_b / RH_B (NOT (VCC - v_b) / RH_B). Using the wrong
+        // drop term (~300-400 ticks) instead of v_b (~3700-3900 ticks) overstated
+        // hFE by ~10x for germanium BJTs.
+        uint32_t ib_ticks = v_b;
+        if (ib_ticks > 0) {
             uint32_t v_c_active = (v_c > v_c_leak) ? (v_c - v_c_leak) : 0;
-            hfe = (uint32_t)(((uint64_t)v_c_active * rh_b) / ((uint64_t)drop_b_pnp * rl_c));
+            hfe = (uint32_t)(((uint64_t)v_c_active * rh_b) / ((uint64_t)ib_ticks * rl_c));
         }
         if (out_vbe) *out_vbe = (v_e > v_b) ? ((uint32_t)(v_e - v_b) * (uint32_t)vdda_mv / 4096) : 0;
     }
@@ -355,6 +360,138 @@ static bool test_mosfet_channel(uint8_t g, uint8_t d, uint8_t s, bool is_nch,
     *out_vth = measure_vth(g, d, s, is_nch);
     
     return true;
+}
+
+static bool measure_inductor(uint8_t pA, uint8_t pB, uint32_t r_dc_ohm100, uint32_t* out_uH, uint32_t* out_freq_hz) {
+    if (pA >= 3 || pB >= 3 || pA == pB) return false;
+    
+    // Inductors, relay coils, and RF chokes can have DC resistance up to ~1200 ohms
+    float r_dc = (float)r_dc_ohm100 / 100.0f;
+    if (r_dc > 1200.0f) return false;
+    
+    set_probe_hiz(0); set_probe_hiz(1); set_probe_hiz(2);
+    
+    float r_senseA = (float)g_RL[pA] / 10.0f;
+    if (r_senseA < 100.0f) r_senseA = 680.0f;
+    float r_senseB = (float)g_RL[pB] / 10.0f;
+    if (r_senseB < 100.0f) r_senseB = 680.0f;
+    
+    uint8_t adcPinA = probes[pA].adc_pin;
+    uint8_t adcPinB = probes[pB].adc_pin;
+    
+    float measuredL_uH = 0.0f;
+    uint32_t bestFreq = 1000;
+    bool foundInductor = false;
+    
+    #if defined(ARDUINO_ARCH_STM32)
+    // Enable DWT cycle counter
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    
+    uint8_t pinA_num = (pA == 0 ? 7 : (pA == 1 ? 6 : 5));
+    uint8_t pinB_num = (pB == 0 ? 7 : (pB == 1 ? 6 : 5));
+    
+    uint32_t setMaskA   = (1UL << pinA_num);
+    uint32_t resetMaskA = (1UL << (pinA_num + 16));
+    uint32_t readMaskB  = (1UL << pinB_num);
+    
+    set_probe_rl_gnd(pB); // Probe B grounded via 680 ohm RL
+    pinMode(adcPinB, INPUT);
+    pinMode(adcPinA, OUTPUT);
+    GPIOA->BSRR = resetMaskA;
+    delayMicroseconds(50);
+    
+    // Check if line is initially LOW
+    if ((GPIOA->IDR & readMaskB) == 0) {
+        uint32_t total_cycles = 0;
+        int numTests = 64;
+        int validTests = 0;
+        
+        // Single trial to estimate magnitude
+        uint32_t t_init = DWT->CYCCNT;
+        GPIOA->BSRR = setMaskA;
+        uint32_t timeout_cyc = 84000000; // 1 second timeout (supports up to 100 Henries)
+        while ((GPIOA->IDR & readMaskB) == 0) {
+            if (DWT->CYCCNT - t_init > timeout_cyc) break;
+        }
+        uint32_t first_cyc = DWT->CYCCNT - t_init;
+        GPIOA->BSRR = resetMaskA;
+        
+        // For large coils (> 10 mH), 8 tests is plenty; for small coils, use 64 tests
+        if (first_cyc > 10000) numTests = 8;
+        else if (first_cyc > 2000) numTests = 16;
+        else numTests = 64;
+        
+        __disable_irq(); // Disable interrupts during pulse timing
+        
+        for (int test = 0; test < numTests; test++) {
+            // Active discharge
+            GPIOA->BSRR = resetMaskA;
+            delayMicroseconds(20);
+            
+            uint32_t t_start = DWT->CYCCNT;
+            GPIOA->BSRR = setMaskA; // Atomic 1-cycle HIGH write to PA7/PA6/PA5
+            
+            while ((GPIOA->IDR & readMaskB) == 0) {
+                if (DWT->CYCCNT - t_start > timeout_cyc) break;
+            }
+            uint32_t elapsed_cyc = DWT->CYCCNT - t_start;
+            GPIOA->BSRR = resetMaskA;
+            
+            if (elapsed_cyc >= 3 && elapsed_cyc < timeout_cyc) {
+                total_cycles += elapsed_cyc;
+                validTests++;
+            }
+        }
+        
+        __enable_irq();
+        
+        if (validTests >= (numTests / 2)) {
+            float avg_cycles = (float)total_cycles / (float)validTests;
+            
+            // Hardware baseline for zero-inductance wire (GPIO synchronizer, APB bus read, branch = 19.35 cycles)
+            float baseline_cycles = 19.35f;
+            float net_cycles = (avg_cycles > baseline_cycles) ? (avg_cycles - baseline_cycles) : 0.0f;
+            
+            float r_fast = 25.0f + r_dc + r_senseB;
+            float v_steady = 3.3f * (r_senseB / r_fast);
+            
+            // Input threshold V_IT ~ 1.40V
+            float k_thresh = 0.580f;
+            if (v_steady > 1.50f) {
+                k_thresh = -logf(1.0f - (1.40f / v_steady));
+                if (k_thresh < 0.1f) k_thresh = 0.580f;
+            }
+            
+            float t_sec = net_cycles / 84000000.0f;
+            float tau = t_sec / k_thresh;
+            float l_fast_uH = tau * r_fast * 1000000.0f;
+            
+            // An inductor must have measurable inductive delay (net_cycles >= 1.5 and L >= 15 uH)
+            // Resistors (L = 0) have net_cycles ~ 0 (noise floor < 1.5 cycles)
+            if (net_cycles >= 1.5f && l_fast_uH >= 15.0f) {
+                measuredL_uH = l_fast_uH;
+                if (measuredL_uH >= 1000000.0f)     bestFreq = 100;     // >= 1 H: 100 Hz
+                else if (measuredL_uH >= 10000.0f)  bestFreq = 1000;    // 10 mH .. 1 H: 1 kHz
+                else if (measuredL_uH >= 100.0f)    bestFreq = 10000;   // 100 uH .. 10 mH: 10 kHz
+                else                                bestFreq = 100000;  // < 100 uH: 100 kHz
+                foundInductor = true;
+            }
+        }
+    }
+    pinMode(adcPinA, INPUT_ANALOG);
+    pinMode(adcPinB, INPUT_ANALOG);
+    set_probe_hiz(pA);
+    set_probe_hiz(pB);
+    #endif
+    
+    if (foundInductor && measuredL_uH >= 1.0f) {
+        if (out_uH) *out_uH = (uint32_t)(measuredL_uH * 1000.0f); // Return in nH (1 uH = 1000 nH)
+        if (out_freq_hz) *out_freq_hz = bestFreq;
+        return true;
+    }
+    
+    return false;
 }
 
 static void analyze_data() {
@@ -489,6 +626,21 @@ static void analyze_data() {
         if (vV > 500 && vG > 500 && diff_fwd < 15 && rev_vV > 500 && rev_vG > 500 && diff_rev < 15) {
             uint32_t diff = (diff_fwd + diff_rev) / 2;
             uint32_t R100 = (uint32_t)68000UL * diff / vG; // 0.01 ohm units
+            
+            // Check if this low DC resistance component is an Inductor before declaring Short Circuit!
+            uint32_t ind_uH = 0, ind_freq = 0;
+            if (measure_inductor(pV, pG, R100, &ind_uH, &ind_freq)) {
+                final_result.type = COMP_INDUCTOR;
+                final_result.pinA = pV;
+                final_result.pinB = pG;
+                final_result.pinC = 3 - (pV + pG);
+                final_result.value1 = ind_uH;
+                final_result.value2 = R100;
+                final_result.value3 = ind_freq;
+                final_result.flags = 0;
+                return;
+            }
+
             final_result.type = COMP_SHORT;
             final_result.pinA = pV;
             final_result.pinB = pG;
@@ -579,14 +731,28 @@ static void analyze_data() {
             }
         }
     }
-    
+
     if (valid_count == 1) {
         for (int p = 0; p < 3; p++) {
             if (r_valid[p]) {
+                uint8_t pA = rpairs[p].a;
+                uint8_t pB = rpairs[p].b;
+                uint32_t ind_uH = 0, ind_freq = 0;
+                if (measure_inductor(pA, pB, r_vals[p] * 100, &ind_uH, &ind_freq)) {
+                    final_result.type = COMP_INDUCTOR;
+                    final_result.pinA = pA;
+                    final_result.pinB = pB;
+                    final_result.pinC = 3 - (pA + pB);
+                    final_result.value1 = ind_uH;
+                    final_result.value2 = r_vals[p] * 100;
+                    final_result.value3 = ind_freq;
+                    final_result.flags = 0;
+                    return;
+                }
                 final_result.type = COMP_RESISTOR;
-                final_result.pinA = rpairs[p].a;
-                final_result.pinB = rpairs[p].b;
-                final_result.pinC = 3 - (rpairs[p].a + rpairs[p].b);
+                final_result.pinA = pA;
+                final_result.pinB = pB;
+                final_result.pinC = 3 - (pA + pB);
                 final_result.value1 = r_vals[p] * 100;
                 final_result.value2 = 0;
                 final_result.flags = 1;
@@ -663,12 +829,13 @@ static void analyze_data() {
             bool reverse_blocked = false;
             if (rev_idx >= 0) {
                 uint16_t rev_vG = GET_V(rev_idx, pV, false);
-                // A diode should have significantly less reverse conduction than forward.
-                // A resistor will have equal conduction. AC noise might cause some reverse leakage.
-                reverse_blocked = (rev_vG < (vG / 4) + 40); 
+                // A true diode MUST have near-zero reverse conduction.
+                // A bidirectional resistor conducts equally in reverse (rev_vG ≈ vG).
+                reverse_blocked = (rev_vG < 80) && (rev_vG < (vG / 5)); 
             }
             
-            if (vf_mv > 100 && vf_mv < 3500 && reverse_blocked) {
+            // Diode forward voltage must be at least 180 mV (Schottky) to 3500 mV (LED)
+            if (vf_mv >= 180 && vf_mv < 3500 && reverse_blocked) {
                 diodes[diode_count].anode = pV;
                 diodes[diode_count].cathode = pG;
                 diodes[diode_count].vf_mv = vf_mv;
@@ -904,8 +1071,15 @@ static uint16_t measure_esr(uint8_t probeA, uint8_t probeB) {
         while (micros() - t_start < start_delay) {} // Wait to center the burst
         
         for (int k = 0; k < samples_per_half; k++) {
-            vA_pos_sum += analogRead(probes[probeA].adc_pin);
-            vB_pos_sum += analogRead(probes[probeB].adc_pin);
+            if (k & 1) {
+                // Odd: sample B first, then A
+                vB_pos_sum += analogRead(probes[probeB].adc_pin);
+                vA_pos_sum += analogRead(probes[probeA].adc_pin);
+            } else {
+                // Even: sample A first, then B
+                vA_pos_sum += analogRead(probes[probeA].adc_pin);
+                vB_pos_sum += analogRead(probes[probeB].adc_pin);
+            }
         }
         
         while (micros() - t_start < 500) {} // Wait until exactly 500us
@@ -918,8 +1092,15 @@ static uint16_t measure_esr(uint8_t probeA, uint8_t probeB) {
         while (micros() - t_start < start_delay) {}
         
         for (int k = 0; k < samples_per_half; k++) {
-            vA_neg_sum += analogRead(probes[probeA].adc_pin);
-            vB_neg_sum += analogRead(probes[probeB].adc_pin);
+            if (k & 1) {
+                // Odd: sample B first, then A
+                vB_neg_sum += analogRead(probes[probeB].adc_pin);
+                vA_neg_sum += analogRead(probes[probeA].adc_pin);
+            } else {
+                // Even: sample A first, then B
+                vA_neg_sum += analogRead(probes[probeA].adc_pin);
+                vB_neg_sum += analogRead(probes[probeB].adc_pin);
+            }
         }
         
         while (micros() - t_start < 500) {}
@@ -954,7 +1135,8 @@ static uint16_t measure_esr(uint8_t probeA, uint8_t probeB) {
     if (v_mid > 0.0f && v_esr_drop > 0.0f) {
         float rl_b = (g_RL[probeB] > 0) ? ((float)g_RL[probeB] / 10.0f) : 680.0f;
         float esr = (v_esr_drop / v_mid) * rl_b;
-        esr -= 0.05f;
+        // Subtract switch on-resistance (~1.2 ohm)
+        if (esr > 1.2f) esr -= 1.2f; else esr = 0.0f;
         uint32_t r_esr_x100 = (uint32_t)(esr * 100.0f);
         if (r_esr_x100 > 65000) r_esr_x100 = 65000;
         return (uint16_t)r_esr_x100;
@@ -1073,10 +1255,10 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
         set_probe_hiz(probeB);
 
         if (r1_ok && elapsed >= 15) {
-            // C = t / R_high
+            // C = t / R_high (elapsed in us, rh_val in ohms => C in pF = elapsed * 1e6 / rh_val)
             uint32_t rh_val = g_RH[probeA];
             if (rh_val == 0) rh_val = 470000;
-            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 1000000000ULL / (uint64_t)rh_val);
+            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 1000000ULL / (uint64_t)rh_val);
             
             // Subtract basic stray capacitance of probes/ADC
             if (c_pf > 25) c_pf -= 25; else c_pf = 0;
@@ -1102,22 +1284,22 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
     // ==========================================================
     discharge_probes_completely(probeA, probeB);
 
-    set_probe_rl_gnd(probeB);
-    set_probe_rl_vcc(probeA);
-    delayMicroseconds(10); // Short settle for accurate v_start
-
-    // Initial check to calculate dynamic threshold
+    // Initial check: ensure probes are discharged before charging starts
     v_start = analogRead(probes[probeA].adc_pin);
-    
-    // Dynamic 1-tau threshold: V_threshold = VCC - (VCC - V_start) * (1/e)
-    // 1/e = 0.367879. This perfectly compensates for internal P-FET/N-FET asymmetry!
-    uint16_t threshold_large = 4095 - (uint16_t)((4095.0f - v_start) * 0.367879f);
-
-    if (v_start < 300 && v_start < threshold_large) {
+    if (v_start < 300) {
+        set_probe_rl_gnd(probeB);
         uint32_t t_start = micros();
-        uint32_t timeout_us = 2500000; // 2.5 seconds max (up to ~1800 uF)
+        set_probe_rl_vcc(probeA); // Start charging through 680 ohm RL
+        
+        uint32_t timeout_us = 3500000; // 3.5 seconds max (up to ~2500 uF)
         bool r2_ok = false;
         uint32_t elapsed = 0;
+        
+        // When charging across RL_A (680) and RL_B (680):
+        // At t = 0: V_A = VCC/2 ~ 2048. At t = 1*tau: V_threshold = VCC - (VCC/2)*e^-1 = 4095 - 753 = 3342.
+        uint16_t threshold_large = 3342;
+        uint16_t v_prev = analogRead(probes[probeA].adc_pin);
+        uint32_t t_last_check = micros();
 
         while (micros() - t_start < timeout_us) {
             uint16_t v = analogRead(probes[probeA].adc_pin);
@@ -1127,9 +1309,13 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
                 break;
             }
             
-            // Abort if voltage isn't rising
-            if (micros() - t_start > 1000 && v < 2000) {
-                break;
+            // Abort if voltage is completely flat and stuck in a static resistor divider below threshold
+            if (micros() - t_last_check > 30000) {
+                if (v <= v_prev + 5 && v < threshold_large - 100) {
+                    break; // Static resistor divider detected, not a charging capacitor!
+                }
+                v_prev = v;
+                t_last_check = micros();
             }
         }
 
@@ -1137,10 +1323,10 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB) {
         set_probe_hiz(probeB);
 
         if (r2_ok && elapsed > 20) {
-            // C = t / R_total
+            // C = t / R_total (elapsed in us, rl_sum in ohms => C in pF = elapsed * 1e6 / rl_sum)
             uint32_t rl_sum = (g_RL[probeA] + g_RL[probeB]) / 10;
             if (rl_sum == 0) rl_sum = 1360;
-            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 913242ULL / (uint64_t)rl_sum);
+            uint32_t c_pf = (uint32_t)((uint64_t)elapsed * 1000000ULL / (uint64_t)rl_sum);
 
             final_result.type = COMP_CAPACITOR;
             final_result.pinA = probeA;
@@ -1197,9 +1383,13 @@ void comp_tester_loop() {
                 // Read late voltage (t = 5.5 ms)
                 uint16_t late_gnd = read_adc_avg(probes[pGND].adc_pin);
                 
-                // If it looks like a short or huge capacitor, give it 50ms more to charge!
-                if (early_gnd > 1000 && (early_gnd < late_gnd + 5)) {
-                    delay(50);
+                // If the GND node is high and barely decays over 5 ms, it is either a short,
+                // a low-resistance component, a diode, OR a LARGE capacitor (tau >> 5 ms).
+                // Extend the observation window so slow capacitor charging current
+                // decay becomes visible (e.g. 470 uF: tau ~640 ms, only ~3% drop at 5.5 ms,
+                // but ~27% after the extra 250 ms).
+                if (early_gnd > 1000 && late_gnd > (early_gnd - 150)) {
+                    delay(250);
                     late_gnd = read_adc_avg(probes[pGND].adc_pin);
                 }
                 
@@ -1217,9 +1407,13 @@ void comp_tester_loop() {
                 if (pGND == 1) scan_results[scan_step].vB_rl = late_gnd;
                 if (pGND == 2) scan_results[scan_step].vC_rl = late_gnd;
                 
-                // Check if current decayed (characteristic of capacitor charging)
-                // Threshold lowered to 5 to catch slow-charging large capacitors
-                if (early_gnd > 150 && late_gnd < early_gnd - 5) {
+                // Check if current decayed significantly (characteristic of capacitor charging).
+                // Requiring a 3/4 (25%+) decay over the 5 ms window missed large electrolytics
+                // (e.g. 33 uF has tau ~45 ms and only decays ~12%), which then fell through to the
+                // resistor/inductor path and were reported as fake inductors.
+                // Resistors/inductors/diodes have static current (noise < 20 counts) and never
+                // trigger capacitive decay, so a modest 150-count drop is a safe detector.
+                if (early_gnd > 300 && late_gnd < (early_gnd - 150)) {
                     scan_results[scan_step].is_capacitive = true;
                 } else {
                     scan_results[scan_step].is_capacitive = false;
@@ -1260,24 +1454,50 @@ void comp_tester_loop() {
                 analyze_data();
             }
             
-            // Targeted capacitor measurement comparing all pair directions
-            if (final_result.type == COMP_NONE) {
+            // Targeted capacitor measurement. Prefer probe pairs that already showed
+            // capacitive decay during the scan; fall back to all pairs if the
+            // scan flagged nothing (e.g. ultra-small caps in charge-sharing mode).
+            if (final_result.type == COMP_NONE || final_result.type == COMP_OPEN) {
                 CompResult original_result = final_result;
                 CompResult best_cap;
                 memset(&best_cap, 0, sizeof(best_cap));
+                bool tried[3][3];
+                memset(tried, 0, sizeof(tried));
                 
-                // Test probe pairs in both forward and reverse polarities
-                for (uint8_t a = 0; a < 3; a++) {
-                    for (uint8_t b = 0; b < 3; b++) {
-                        if (a == b) continue;
-                        
-                        memset(&final_result, 0, sizeof(final_result));
-                        if (measure_capacitor(a, b)) {
-                            // Reverse biasing an electrolytic capacitor creates a depletion region 
-                            // that acts as a series capacitor, physically LOWERING the total effective capacitance. 
-                            // Therefore, the true forward polarity is the one with the HIGHER measured capacitance.
-                            if (best_cap.type != COMP_CAPACITOR || final_result.value1 > best_cap.value1) {
-                                best_cap = final_result;
+                // Test the scan-detected pair in BOTH polarities (forward polarity of an
+                // electrolytic gives the HIGHER capacitance, so keep the larger result).
+                for (int i = 0; i < 6; i++) {
+                    if (!scan_results[i].is_capacitive) continue;
+                    uint8_t a = perms[i][0];
+                    uint8_t b = perms[i][1];
+                    if (tried[a][b]) continue;
+                    tried[a][b] = tried[b][a] = true;
+                    
+                    // Pair forwards then reversed, keeping whichever measured higher.
+                    if (measure_capacitor(a, b) &&
+                        (best_cap.type != COMP_CAPACITOR || final_result.value1 > best_cap.value1)) {
+                        best_cap = final_result;
+                    }
+                    memset(&final_result, 0, sizeof(final_result));
+                    if (measure_capacitor(b, a) &&
+                        (best_cap.type != COMP_CAPACITOR || final_result.value1 > best_cap.value1)) {
+                        best_cap = final_result;
+                    }
+                }
+                
+                // Fallback: scan flagged nothing (e.g. ultra-small pF caps), try every
+                // remaining pair and keep the highest measured capacitance.
+                if (best_cap.type != COMP_CAPACITOR) {
+                    for (uint8_t a = 0; a < 3; a++) {
+                        for (uint8_t b = 0; b < 3; b++) {
+                            if (a == b || tried[a][b]) continue;
+                            tried[a][b] = tried[b][a] = true;
+                            
+                            memset(&final_result, 0, sizeof(final_result));
+                            if (measure_capacitor(a, b)) {
+                                if (best_cap.type != COMP_CAPACITOR || final_result.value1 > best_cap.value1) {
+                                    best_cap = final_result;
+                                }
                             }
                         }
                     }

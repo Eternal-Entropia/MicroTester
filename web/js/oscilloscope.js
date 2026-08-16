@@ -1274,6 +1274,7 @@
         // Start rendering
         if (oscState.animFrameId) cancelAnimationFrame(oscState.animFrameId);
         oscState.animFrameId = requestAnimationFrame(renderFrame);
+        updateOscIndicator();
     }
 
     function stopOsc() {
@@ -1291,6 +1292,19 @@
         if (oscState.animFrameId) {
             cancelAnimationFrame(oscState.animFrameId);
             oscState.animFrameId = null;
+        }
+        updateOscIndicator();
+    }
+    window.stopOsc = stopOsc;
+
+    function updateOscIndicator() {
+        const oscIndicator = document.getElementById('oscIndicator');
+        if (oscIndicator) {
+            if (oscState.running) {
+                oscIndicator.classList.add('active');
+            } else {
+                oscIndicator.classList.remove('active');
+            }
         }
     }
 

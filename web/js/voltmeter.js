@@ -170,12 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.Calibration && window.Calibration._calibrationBusy) return alert("Calibration is currently in progress. Please wait until finished.");
 
             if (voltConfig.running) {
-                // Stop
-                voltConfig.running = false;
-                microTester.sendCommand(CMD_VOLT_STOP);
-                btnStartStop.innerHTML = '▶ Start';
-                btnStartStop.classList.remove('btn-danger');
-                btnStartStop.classList.add('btn-success');
+                stopVoltmeter();
             } else {
                 // Start — read settings
                 const pin = parseInt(document.getElementById('cfgVoltChannel').value) || 0;
@@ -189,10 +184,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnStartStop.innerHTML = '■ Stop';
                 btnStartStop.classList.remove('btn-success');
                 btnStartStop.classList.add('btn-danger');
+                updateVoltIndicator();
 
                 microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
             }
         });
+    }
+
+    function stopVoltmeter() {
+        if (!voltConfig.running) return;
+        voltConfig.running = false;
+        microTester.sendCommand(CMD_VOLT_STOP);
+        const btnStartStop = document.getElementById('btnStartStop');
+        if (btnStartStop) {
+            btnStartStop.innerHTML = '▶ Start';
+            btnStartStop.classList.remove('btn-danger');
+            btnStartStop.classList.add('btn-success');
+        }
+        updateVoltIndicator();
+    }
+    window.stopVoltmeter = stopVoltmeter;
+
+    function updateVoltIndicator() {
+        const voltIndicator = document.getElementById('voltIndicator');
+        if (voltIndicator) {
+            if (voltConfig.running) {
+                voltIndicator.classList.add('active');
+            } else {
+                voltIndicator.classList.remove('active');
+            }
+        }
     }
 
     // --- USB Data Receiver ---

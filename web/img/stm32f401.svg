@@ -1,303 +1,72 @@
-<svg width="1000" height="780" xmlns="http://www.w3.org/2000/svg">
- <defs>
-  <!-- Dark EDA Grid Pattern -->
-  <pattern id="eda-grid-dark" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="matrix(1,0,0,1,-154,33)">
-   <path d="m20,0l-20,0l0,20" fill="none" stroke="#1e293b" id="svg_1"/>
-  </pattern>
- </defs>
- <!-- Background Grid -->
- <!-- Header Title -->
- <!-- SECTION 1: VOLTMETER AND OSCILLOSCOPE (PA1) -->
- <!-- SECTION 2: COMPONENT TESTER PROBES (TP1, TP2, TP3) -->
- <!-- SECTION 3: SIGNAL GENERATOR OUTPUT -->
- <g>
-  <title>Layer 1</title>
-  <text x="486" y="20" fill="#38bdf8" font-size="18" font-weight="bold" letter-spacing="0.5" id="svg_4">STM32F401 (BLACK PILL) WIRING SCHEMATIC DIAGRAM</text>
-  <g id="svg_6">
-   <text x="26" y="37" fill="#38bdf8" font-size="13" font-weight="bold" id="svg_7">[1] VOLTMETER &amp; OSCILLOSCOPE INPUT CIRCUIT (CH1-4 / PA1-4)</text>
-   <!-- Net Tag PA1 -->
-   <g id="svg_8">
-    <polygon points="34,161 114,161 129,171 114,181 34,181 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_9"/>
-    <text x="38" y="175" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_10">PA1-PA4</text>
-   </g>
-   <!-- Cyan Wires -->
-   <line x1="129" y1="171" x2="234" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_11"/>
-   <circle cx="234" cy="171" r="4.5" fill="#ef4444" id="svg_12"/>
-   <!-- Resistor R1 (1M Series to Probe) -->
-   <line x1="234" y1="171" x2="314" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_13"/>
-   <g id="svg_14">
-    <rect x="314" y="159" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_15"/>
-    <text x="341.5" y="153" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_16">R1</text>
-    <text x="341.5" y="175" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_17">1M</text>
-   </g>
-   <line x1="369" y1="171" x2="464" y2="171" stroke="#38bdf8" stroke-width="2.5" id="svg_18"/>
-   <!-- Terminal Flag: INPUT PROBE (+) -->
-   <g id="svg_19">
-    <polygon points="464,159 614,159 629,171 614,183 464,183 " fill="#0284c7" stroke="#38bdf8" stroke-width="1.5" id="svg_20"/>
-    <text x="476" y="175" fill="#ffffff" font-size="11" font-weight="bold" id="svg_21">INPUT PROBE (+)</text>
-   </g>
-   <text x="464" y="199" fill="#94a3b8" font-size="10" id="svg_22">Range: ±30V (with 1.65V Bias)</text>
-   <!-- Resistor R2 (100k to GND) -->
-   <line x1="234" y1="171" x2="234" y2="211" stroke="#38bdf8" stroke-width="2.5" id="svg_23"/>
-   <g id="svg_24">
-    <rect x="222" y="211" width="24" height="45" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_25"/>
-    <text x="254" y="231" fill="#fbbf24" font-size="11" font-weight="bold" id="svg_26">R2</text>
-    <text x="254" y="246" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_27">100k</text>
-   </g>
-   <line x1="234" y1="256" x2="234" y2="271" stroke="#38bdf8" stroke-width="2.5" id="svg_28"/>
-   <!-- GND Symbol -->
-   <line x1="219" y1="271" x2="249" y2="271" stroke="#cbd5e1" stroke-width="3" id="svg_29"/>
-   <line x1="224" y1="276" x2="244" y2="276" stroke="#cbd5e1" stroke-width="2" id="svg_30"/>
-   <line x1="229" y1="281" x2="239" y2="281" stroke="#cbd5e1" stroke-width="1.5" id="svg_31"/>
-   <text x="256" y="276" fill="#cbd5e1" font-size="10" font-weight="bold" id="svg_32">GND</text>
-   <!-- Resistor R3 (100k Bias to PB9-PB6) -->
-   <line x1="234" y1="171" x2="234" y2="136" stroke="#38bdf8" stroke-width="2.5" id="svg_33"/>
-   <g id="svg_34">
-    <rect x="222" y="91" width="24" height="45" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_35"/>
-    <text x="254" y="111" fill="#fbbf24" font-size="11" font-weight="bold" id="svg_36">R3</text>
-    <text x="254" y="126" fill="#f8fafc" font-size="11" font-weight="bold" id="svg_37">100k</text>
-   </g>
-   <line x1="234" y1="91" x2="234" y2="76" stroke="#38bdf8" stroke-width="2.5" id="svg_38"/>
-   <!-- Bias Control Pin -->
-   <polygon points="234,66 227,76 241,76 " fill="#38bdf8" id="svg_39"/>
-   <text x="249" y="74" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_40">PB9-PB6</text>
-   
-   <!-- Multi-Channel Explanation -->
-   <g id="svg_expl">
-    <rect x="660" y="55" width="310" height="135" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5" rx="5"/>
-    <text x="675" y="75" fill="#38bdf8" font-size="12" font-weight="bold">MULTI-CHANNEL MAPPING:</text>
-    <text x="675" y="100" fill="#f8fafc" font-size="11">• CH1: Input = PA1, Bias = PB9</text>
-    <text x="675" y="120" fill="#f8fafc" font-size="11">• CH2: Input = PA2, Bias = PB8</text>
-    <text x="675" y="140" fill="#f8fafc" font-size="11">• CH3: Input = PA3, Bias = PB7</text>
-    <text x="675" y="160" fill="#f8fafc" font-size="11">• CH4: Input = PA4, Bias = PB6</text>
-    <text x="675" y="180" fill="#94a3b8" font-size="10">(Build this exact circuit for each channel you need)</text>
-   </g>
-  </g>
-  <g id="svg_41">
-   <text x="292" y="266" fill="#22c55e" font-size="13" font-weight="bold" id="svg_42">[2] COMPONENT TESTER PROBES (TP1, TP2, TP3 WIRING)</text>
-   <!-- PROBE TP1 -->
-   <g id="svg_43">
-    <!-- PA7 ADC Sense -->
-    <g id="svg_44">
-     <polygon points="43,288 128,288 143,298 128,308 43,308 " fill="#1e293b" stroke="#ef4444" stroke-width="2" id="svg_45"/>
-     <text x="53" y="302" fill="#ef4444" font-size="11" font-weight="bold" id="svg_46">PA7(ADC)</text>
-    </g>
-    <line x1="143" y1="298" x2="403" y2="298" stroke="#22c55e" stroke-width="2.5" id="svg_47"/>
-    <circle cx="403" cy="298" r="4.5" fill="#ef4444" id="svg_48"/>
-    <!-- PB10 (680 Ohms) -->
-    <g id="svg_49">
-     <polygon points="43,318 128,318 143,328 128,338 43,338 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_50"/>
-     <text x="53" y="332" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_51">PB10</text>
-    </g>
-    <line x1="143" y1="328" x2="223" y2="328" stroke="#22c55e" stroke-width="2.5" id="svg_52"/>
-    <g id="svg_53">
-     <rect x="223" y="316" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_54"/>
-     <text x="250.5" y="311" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_55">R4</text>
-     <text x="250.5" y="332" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_56">680</text>
-    </g>
-    <line x1="278" y1="328" x2="403" y2="328" stroke="#22c55e" stroke-width="2.5" id="svg_57"/>
-    <!-- PB1 (470k) -->
-    <g id="svg_58">
-     <polygon points="43,353 128,353 143,363 128,373 43,373 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_59"/>
-     <text x="53" y="367" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_60">PB1</text>
-    </g>
-    <line x1="143" y1="363" x2="223" y2="363" stroke="#22c55e" stroke-width="2.5" id="svg_61"/>
-    <g id="svg_62">
-     <rect x="223" y="351" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_63"/>
-     <text x="250.5" y="346" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_64">R5</text>
-     <text x="250.5" y="367" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_65">470k</text>
-    </g>
-    <line x1="278" y1="363" x2="403" y2="363" stroke="#22c55e" stroke-width="2.5" id="svg_66"/>
-    <!-- Joined Bus Line to TP1 -->
-    <line x1="403" y1="298" x2="403" y2="363" stroke="#22c55e" stroke-width="2.5" id="svg_67"/>
-    <circle cx="403" cy="328" r="4.5" fill="#ef4444" id="svg_68"/>
-    <circle cx="403" cy="363" r="4.5" fill="#ef4444" id="svg_69"/>
-    <line x1="403" y1="328" x2="473" y2="328" stroke="#22c55e" stroke-width="3" id="svg_70"/>
-    <!-- Terminal Flag TP1 -->
-    <g id="svg_71">
-     <polygon points="473,316 623,316 638,328 623,340 473,340 " fill="#dc2626" stroke="#ef4444" stroke-width="1.5" id="svg_72"/>
-     <text x="485" y="332" fill="#ffffff" font-size="12" font-weight="bold" id="svg_73">PROBE TP1 (Red)</text>
-    </g>
-   </g>
-   <!-- PROBE TP2 -->
-   <g id="svg_74">
-    <!-- PA6 ADC Sense -->
-    <g id="svg_75">
-     <polygon points="43,398 128,398 143,408 128,418 43,418 " fill="#1e293b" stroke="#22c55e" stroke-width="2" id="svg_76"/>
-     <text x="53" y="412" fill="#22c55e" font-size="11" font-weight="bold" id="svg_77">PA6(ADC)</text>
-    </g>
-    <line x1="143" y1="408" x2="403" y2="408" stroke="#22c55e" stroke-width="2.5" id="svg_78"/>
-    <circle cx="403" cy="408" r="4.5" fill="#ef4444" id="svg_79"/>
-    <!-- PB12 (680 Ohms) -->
-    <g id="svg_80">
-     <polygon points="43,428 128,428 143,438 128,448 43,448 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_81"/>
-     <text x="53" y="442" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_82">PB12</text>
-    </g>
-    <line x1="143" y1="438" x2="223" y2="438" stroke="#22c55e" stroke-width="2.5" id="svg_83"/>
-    <g id="svg_84">
-     <rect x="223" y="426" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_85"/>
-     <text x="250.5" y="421" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_86">R6</text>
-     <text x="250.5" y="442" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_87">680</text>
-    </g>
-    <line x1="278" y1="438" x2="403" y2="438" stroke="#22c55e" stroke-width="2.5" id="svg_88"/>
-    <!-- PB13 (470k) -->
-    <g id="svg_89">
-     <polygon points="43,463 128,463 143,473 128,483 43,483 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_90"/>
-     <text x="53" y="477" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_91">PB13</text>
-    </g>
-    <line x1="143" y1="473" x2="223" y2="473" stroke="#22c55e" stroke-width="2.5" id="svg_92"/>
-    <g id="svg_93">
-     <rect x="223" y="461" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_94"/>
-     <text x="250.5" y="456" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_95">R7</text>
-     <text x="250.5" y="477" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_96">470k</text>
-    </g>
-    <line x1="278" y1="473" x2="403" y2="473" stroke="#22c55e" stroke-width="2.5" id="svg_97"/>
-    <!-- Joined Bus Line to TP2 -->
-    <line x1="403" y1="408" x2="403" y2="473" stroke="#22c55e" stroke-width="2.5" id="svg_98"/>
-    <circle cx="403" cy="438" r="4.5" fill="#ef4444" id="svg_99"/>
-    <circle cx="403" cy="473" r="4.5" fill="#ef4444" id="svg_100"/>
-    <line x1="403" y1="438" x2="473" y2="438" stroke="#22c55e" stroke-width="3" id="svg_101"/>
-    <!-- Terminal Flag TP2 -->
-    <g id="svg_102">
-     <polygon points="473,426 623,426 638,438 623,450 473,450 " fill="#16a34a" stroke="#22c55e" stroke-width="1.5" id="svg_103"/>
-     <text x="485" y="442" fill="#ffffff" font-size="12" font-weight="bold" id="svg_104">PROBE TP2 (Grn)</text>
-    </g>
-   </g>
-   <!-- PROBE TP3 -->
-   <g id="svg_105">
-    <!-- PA5 ADC Sense -->
-    <g id="svg_106">
-     <polygon points="43,508 128,508 143,518 128,528 43,528 " fill="#1e293b" stroke="#3b82f6" stroke-width="2" id="svg_107"/>
-     <text x="53" y="522" fill="#3b82f6" font-size="11" font-weight="bold" id="svg_108">PA5(ADC)</text>
-    </g>
-    <line x1="143" y1="518" x2="403" y2="518" stroke="#22c55e" stroke-width="2.5" id="svg_109"/>
-    <circle cx="403" cy="518" r="4.5" fill="#ef4444" id="svg_110"/>
-    <!-- PB14 (680 Ohms) -->
-    <g id="svg_111">
-     <polygon points="43,538 128,538 143,548 128,558 43,558 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_112"/>
-     <text x="53" y="552" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_113">PB14</text>
-    </g>
-    <line x1="143" y1="548" x2="223" y2="548" stroke="#22c55e" stroke-width="2.5" id="svg_114"/>
-    <g id="svg_115">
-     <rect x="223" y="536" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_116"/>
-     <text x="250.5" y="531" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_117">R8</text>
-     <text x="250.5" y="552" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_118">680</text>
-    </g>
-    <line x1="278" y1="548" x2="403" y2="548" stroke="#22c55e" stroke-width="2.5" id="svg_119"/>
-    <!-- PB15 (470k) -->
-    <g id="svg_120">
-     <polygon points="43,573 128,573 143,583 128,593 43,593 " fill="#1e293b" stroke="#38bdf8" stroke-width="2" id="svg_121"/>
-     <text x="53" y="587" fill="#38bdf8" font-size="11" font-weight="bold" id="svg_122">PB15</text>
-    </g>
-    <line x1="143" y1="583" x2="223" y2="583" stroke="#22c55e" stroke-width="2.5" id="svg_123"/>
-    <g id="svg_124">
-     <rect x="223" y="571" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3" id="svg_125"/>
-     <text x="250.5" y="566" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle" id="svg_126">R9</text>
-     <text x="250.5" y="587" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle" id="svg_127">470k</text>
-    </g>
-    <line x1="278" y1="583" x2="403" y2="583" stroke="#22c55e" stroke-width="2.5" id="svg_128"/>
-    <line x1="403" y1="518" x2="403" y2="583" stroke="#22c55e" stroke-width="2.5" id="svg_129"/>
-    <circle cx="403" cy="548" r="4.5" fill="#ef4444" id="svg_130"/>
-    <circle cx="403" cy="583" r="4.5" fill="#ef4444" id="svg_131"/>
-    <line x1="403" y1="548" x2="473" y2="548" stroke="#22c55e" stroke-width="3" id="svg_132"/>
-    <!-- Terminal Flag TP3 -->
-    <g id="svg_133">
-     <polygon points="473,536 623,536 638,548 623,560 473,560 " fill="#2563eb" stroke="#3b82f6" stroke-width="1.5" id="svg_134"/>
-     <text x="485" y="552" fill="#ffffff" font-size="12" font-weight="bold" id="svg_135">PROBE TP3 (Blue)</text>
-    </g>
-   </g>
-  </g>
-  <g id="svg_136">
-   <text x="19" y="612" fill="#a855f7" font-size="13" font-weight="bold">[3] SIGNAL GENERATOR OUTPUT (PA8 / PWM / DC)</text>
-   <!-- PA8 Net Tag -->
-   <g>
-    <polygon points="39,632 124,632 139,642 124,652 39,652 " fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
-    <text x="51" y="646" fill="#a855f7" font-size="11" font-weight="bold">PA8 (PWM)</text>
-   </g>
-   <line x1="139" y1="642" x2="219" y2="642" stroke="#22c55e" stroke-width="2.5"/>
-   <!-- Resistor R10 (1k) Protection -->
-   <g>
-    <rect x="219" y="630" width="55" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
-    <text x="246.5" y="625" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R10</text>
-    <text x="246.5" y="646" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">1k</text>
-   </g>
-   <line x1="274" y1="642" x2="469" y2="642" stroke="#22c55e" stroke-width="2.5"/>
-   <!-- Terminal Flag SIG OUT -->
-   <g>
-    <polygon points="470,629 620,629 635,641 620,653 470,653 " fill="#9333ea" stroke="#a855f7" stroke-width="1.5"/>
-    <text x="481" y="646" fill="#ffffff" font-size="12" font-weight="bold">SIG OUT (PA8)</text>
-   </g>
-  </g>
-  
-  <g id="svg_137">
-   <text x="19" y="685" fill="#f43f5e" font-size="13" font-weight="bold">[4] HIGH-FIDELITY SIGNAL GENERATOR / DAC (PB5)</text>
-   
-   <!-- PB5 Net Tag -->
-   <g>
-    <polygon points="39,707 124,707 139,717 124,727 39,727 " fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
-    <text x="51" y="721" fill="#f43f5e" font-size="11" font-weight="bold">PB5 (MOSI)</text>
-   </g>
-   
-   <!-- Wire to R1 -->
-   <line x1="139" y1="717" x2="170" y2="717" stroke="#22c55e" stroke-width="2.5"/>
-   
-   <!-- Resistor R1 (330) -->
-   <g>
-    <rect x="170" y="705" width="45" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
-    <text x="192.5" y="700" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R11</text>
-    <text x="192.5" y="721" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">330</text>
-   </g>
-   
-   <!-- Wire R1 to Node A and R2 -->
-   <line x1="215" y1="717" x2="290" y2="717" stroke="#22c55e" stroke-width="2.5"/>
-   <circle cx="240" cy="717" r="4.5" fill="#ef4444"/>
-   
-   <!-- Capacitor C1 (150pF) -->
-   <g>
-    <line x1="240" y1="717" x2="240" y2="737" stroke="#22c55e" stroke-width="2.5"/>
-    <line x1="225" y1="737" x2="255" y2="737" stroke="#38bdf8" stroke-width="2.5"/>
-    <line x1="225" y1="743" x2="255" y2="743" stroke="#38bdf8" stroke-width="2.5"/>
-    <line x1="240" y1="743" x2="240" y2="757" stroke="#22c55e" stroke-width="2.5"/>
-    <!-- GND -->
-    <line x1="225" y1="757" x2="255" y2="757" stroke="#cbd5e1" stroke-width="2.5"/>
-    <line x1="232" y1="762" x2="248" y2="762" stroke="#cbd5e1" stroke-width="2"/>
-    <line x1="237" y1="767" x2="243" y2="767" stroke="#cbd5e1" stroke-width="1.5"/>
-    
-    <text x="262" y="739" fill="#fbbf24" font-size="11" font-weight="bold">C1</text>
-    <text x="262" y="752" fill="#f8fafc" font-size="10">150pF</text>
-   </g>
-
-   <!-- Resistor R2 (1k) -->
-   <g>
-    <rect x="290" y="705" width="45" height="24" fill="#0f172a" stroke="#fbbf24" stroke-width="2" rx="3"/>
-    <text x="312.5" y="700" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">R12</text>
-    <text x="312.5" y="721" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="middle">1k</text>
-   </g>
-
-   <!-- Wire R2 to Node B and OUT -->
-   <line x1="335" y1="717" x2="470" y2="717" stroke="#22c55e" stroke-width="2.5"/>
-   <circle cx="370" cy="717" r="4.5" fill="#ef4444"/>
-
-   <!-- Capacitor C2 (68pF) -->
-   <g>
-    <line x1="370" y1="717" x2="370" y2="737" stroke="#22c55e" stroke-width="2.5"/>
-    <line x1="355" y1="737" x2="385" y2="737" stroke="#38bdf8" stroke-width="2.5"/>
-    <line x1="355" y1="743" x2="385" y2="743" stroke="#38bdf8" stroke-width="2.5"/>
-    <line x1="370" y1="743" x2="370" y2="757" stroke="#22c55e" stroke-width="2.5"/>
-    <!-- GND -->
-    <line x1="355" y1="757" x2="385" y2="757" stroke="#cbd5e1" stroke-width="2.5"/>
-    <line x1="362" y1="762" x2="378" y2="762" stroke="#cbd5e1" stroke-width="2"/>
-    <line x1="367" y1="767" x2="373" y2="767" stroke="#cbd5e1" stroke-width="1.5"/>
-    
-    <text x="392" y="739" fill="#fbbf24" font-size="11" font-weight="bold">C2</text>
-    <text x="392" y="752" fill="#f8fafc" font-size="10">68pF</text>
-   </g>
-
-   <!-- Terminal Flag SIG OUT -->
-   <g>
-    <polygon points="470,704 620,704 635,717 620,730 470,730 " fill="#e11d48" stroke="#f43f5e" stroke-width="1.5"/>
-    <text x="481" y="721" fill="#ffffff" font-size="12" font-weight="bold">DAC OUT (PB5)</text>
-   </g>
-  </g>
- </g>
-</svg>
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1387 780" width="1387" height="780"><style>tspan{white-space:pre}.a{fill:#0f172a}.b{font-size: 18px;fill: #38bdf8;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.c{font-size: 12px;fill: #38bdf8;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.d{fill:#1e293b;stroke:#38bdf8;stroke-width:2}.e{font-size: 11px;fill: #38bdf8;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.f{stroke:#38bdf8;stroke-width:2.5}.g{fill:#0f172a;stroke:#fbbf24;stroke-width:2}.h{font-size: 11px;fill: #fbbf24;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.i{font-size: 11px;fill: #f8fafc;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.j{fill:#0284c7;stroke:#38bdf8;stroke-width:1.5}.k{font-size: 11px;fill: #ffffff;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.l{font-size: 10px;fill: #94a3b8;font-weight: 400;font-family: "LiberationSans", "Liberation Sans"}.m{font-size: 10px;fill: #fbbf24;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.n{font-size: 10px;fill: #f8fafc;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.o{stroke:#cbd5e1;stroke-width:3}.p{stroke:#cbd5e1;stroke-width:2}.q{stroke:#cbd5e1;stroke-width:1.5}.r{font-size: 10px;fill: #cbd5e1;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.s{fill:#38bdf8}.t{font-size: 10px;fill: #38bdf8;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.u{fill:#1e293b;stroke:#38bdf8;stroke-width:1.5}.v{font-size: 11px;fill: #f8fafc;font-weight: 400;font-family: "LiberationSans", "Liberation Sans"}.w{fill:#dc2626;stroke:#ef4444;stroke-width:1.5}.x{font-size: 13px;fill: #22c55e;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.y{fill:#1e293b;stroke:#ef4444;stroke-width:2}.z{font-size: 11px;fill: #ef4444;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.A{stroke:#22c55e;stroke-width:2.5}.B{font-size: 12px;fill: #ffffff;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.C{fill:#1e293b;stroke:#22c55e;stroke-width:2}.D{font-size: 11px;fill: #22c55e;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.E{fill:#ef4444}.F{stroke:#22c55e;stroke-width:3}.G{fill:#16a34a;stroke:#22c55e;stroke-width:1.5}.H{fill:#1e293b;stroke:#3b82f6;stroke-width:2}.I{font-size: 11px;fill: #3b82f6;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.J{fill:#2563eb;stroke:#3b82f6;stroke-width:1.5}.K{font-size: 13px;fill: #a855f7;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.L{fill:#1e293b;stroke:#a855f7;stroke-width:2}.M{font-size: 11px;fill: #a855f7;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.N{fill:#9333ea;stroke:#a855f7;stroke-width:1.5}.O{font-size: 13px;fill: #f43f5e;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.P{fill:#1e293b;stroke:#f43f5e;stroke-width:2}.Q{font-size: 11px;fill: #f43f5e;font-weight: 700;font-family: "LiberationSans-Bold", "Liberation Sans"}.R{stroke:#cbd5e1;stroke-width:2.5}.S{font-size: 10px;fill: #f8fafc;font-weight: 400;font-family: "LiberationSans", "Liberation Sans"}.T{fill:#e11d48;stroke:#f43f5e;stroke-width:1.5}</style><path fill-rule="evenodd" class="a" d="m0 0h1386.3v779.8h-1386.3z"/><text transform="translate(475.9,20)"><tspan x="0" y="0" class="b">STM32F401 (BLACK PILL) WIRING SCHEMATIC DIAGRAM
+</tspan></text><text transform="translate(37,47)"><tspan x="0" y="0" class="c">[1A] VOLTMETER &amp; OSCILLOSCOPE STANDARD INPUT (CH1-4 / DC..1MHz)
+</tspan></text><path fill-rule="evenodd" class="d" d="m34 145h80l15 10-15 10h-80z"/><text transform="translate(38,159)"><tspan x="0" y="0" class="e">PA1-PA4
+</tspan></text><path fill-rule="evenodd" class="f" d="m129 155h104.9"/><path fill-rule="evenodd" class="f" d="m233.9 155h80"/><path fill-rule="evenodd" class="g" d="m316.9 143h49c1.7 0 3 1.3 3 3v18c0 1.6-1.3 3-3 3h-49c-1.6 0-3-1.4-3-3v-18c0-1.7 1.4-3 3-3z"/><text transform="translate(334.4,137)"><tspan x="0" y="0" class="h">R1
+</tspan></text><text transform="translate(333.8,159)"><tspan x="0" y="0" class="i">1M
+</tspan></text><path fill-rule="evenodd" class="f" d="m368.9 155h95"/><path fill-rule="evenodd" class="j" d="m463.9 143h150l15 12-15 12h-150z"/><text transform="translate(475.9,159)"><tspan x="0" y="0" class="k">INPUT PROBE (DC..1MHz)
+</tspan></text><text transform="translate(448.9,182)"><tspan x="0" y="0" class="l">Range: ±30V (R1=1M, R2=100k, R3=100k)
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 155v30"/><path fill-rule="evenodd" class="g" d="m224.9 185h18c1.7 0 3 1.3 3 3v33.9c0 1.7-1.3 3-3 3h-18c-1.6 0-3-1.3-3-3v-33.9c0-1.7 1.4-3 3-3z"/><text transform="translate(253.9,202)"><tspan x="0" y="0" class="m">R2
+</tspan></text><text transform="translate(253.9,214.9)"><tspan x="0" y="0" class="n">100k
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 224.9v10"/><path fill-rule="evenodd" class="o" d="m218.9 234.9h30"/><path fill-rule="evenodd" class="p" d="m223.9 239.9h20"/><path fill-rule="evenodd" class="q" d="m228.9 244.9h10"/><text transform="translate(255.9,239.9)"><tspan x="0" y="0" class="r">GND
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 155v-30"/><path fill-rule="evenodd" class="g" d="m224.9 85h18c1.7 0 3 1.3 3 3v34c0 1.6-1.3 3-3 3h-18c-1.6 0-3-1.4-3-3v-34c0-1.7 1.4-3 3-3z"/><text transform="translate(253.9,102)"><tspan x="0" y="0" class="m">R3
+</tspan></text><text transform="translate(253.9,115)"><tspan x="0" y="0" class="n">100k
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 85v-10"/><path fill-rule="evenodd" class="s" d="m233.9 65l-7 10h14z"/><text transform="translate(248.9,73)"><tspan x="0" y="0" class="t">PB9-PB6
+</tspan></text><path fill-rule="evenodd" class="u" d="m697.8 53h300c2.7 0 5 2.2 5 5v125c0 2.7-2.3 5-5 5h-300c-2.7 0-5-2.3-5-5v-125c0-2.8 2.3-5 5-5z"/><text transform="translate(707.8,73)"><tspan x="0" y="0" class="c">MULTI-CHANNEL MAPPING:
+</tspan></text><text transform="translate(707.8,98)"><tspan x="0" y="0" class="v">• CH1: Input = PA1, Bias = PB9
+</tspan></text><text transform="translate(707.8,118)"><tspan x="0" y="0" class="v">• CH2: Input = PA2, Bias = PB8
+</tspan></text><text transform="translate(707.8,138)"><tspan x="0" y="0" class="v">• CH3: Input = PA3, Bias = PB7
+</tspan></text><text transform="translate(705.8,157)"><tspan x="0" y="0" class="v">• CH4: Input = PA4, Bias = PB6
+</tspan></text><text transform="translate(707.8,178)"><tspan x="0" y="0" class="l">(Build this exact circuit for each channel you need)
+</tspan></text><text transform="translate(43,274.9)"><tspan x="0" y="0" class="c">[1B] HIGH-FREQUENCY INPUT CIRCUIT (CH1-4 / SIGNALS &gt; 1MHz)
+</tspan></text><path fill-rule="evenodd" class="d" d="m34 374.9h80l15 10-15 10h-80z"/><text transform="translate(38,388.9)"><tspan x="0" y="0" class="e">PA1-PA4
+</tspan></text><path fill-rule="evenodd" class="f" d="m129 384.9h104.9"/><path fill-rule="evenodd" class="f" d="m233.9 384.9h80"/><path fill-rule="evenodd" class="g" d="m316.9 372.9h49c1.7 0 3 1.4 3 3v18c0 1.7-1.3 3-3 3h-49c-1.6 0-3-1.3-3-3v-18c0-1.6 1.4-3 3-3z"/><text transform="translate(335,367.9)"><tspan x="0" y="0" class="h">R1
+</tspan></text><text transform="translate(329.2,388.9)"><tspan x="0" y="0" class="i">100k
+</tspan></text><path fill-rule="evenodd" class="f" d="m368.9 384.9h95"/><path fill-rule="evenodd" class="j" d="m463.9 372.9h169.9l15 12-15 12h-169.9z"/><text transform="translate(475.9,388.9)"><tspan x="0" y="0" class="k">INPUT PROBE (&gt; 1 MHz)
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 384.9v30"/><path fill-rule="evenodd" class="g" d="m224.9 414.9h18c1.7 0 3 1.3 3 3v34c0 1.6-1.3 3-3 3h-18c-1.6 0-3-1.4-3-3v-34c0-1.7 1.4-3 3-3z"/><text transform="translate(253.9,431.9)"><tspan x="0" y="0" class="m">R2
+</tspan></text><text transform="translate(253.9,444.9)"><tspan x="0" y="0" class="n">10k
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 454.9v10"/><path fill-rule="evenodd" class="o" d="m218.9 464.9h30"/><path fill-rule="evenodd" class="p" d="m223.9 469.9h20"/><path fill-rule="evenodd" class="q" d="m228.9 474.9h10"/><text transform="translate(255.9,469.9)"><tspan x="0" y="0" class="r">GND
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 384.9v-30"/><path fill-rule="evenodd" class="g" d="m224.9 314.9h18c1.7 0 3 1.4 3 3v34c0 1.7-1.3 3-3 3h-18c-1.6 0-3-1.3-3-3v-34c0-1.6 1.4-3 3-3z"/><path fill-rule="evenodd" class="w" d="m1132.7 317.9h150l15 12-15 12h-150z"/><text transform="translate(253.9,331.9)"><tspan x="0" y="0" class="m">R3
+</tspan></text><text transform="translate(253.9,344.9)"><tspan x="0" y="0" class="n">10k
+</tspan></text><path fill-rule="evenodd" class="f" d="m233.9 314.9v-10"/><path fill-rule="evenodd" class="s" d="m233.9 294.9l-7 10h14z"/><text transform="translate(248.9,302.9)"><tspan x="0" y="0" class="t">PB9-PB6
+</tspan></text><text transform="translate(701.8,243.9)"><tspan x="0" y="0" class="x">[2] COMPONENT TESTER PROBES (TP1, TP2, TP3 WIRING)
+</tspan></text><path fill-rule="evenodd" class="y" d="m702.8 274.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,288.9)"><tspan x="0" y="0" class="z">PA7(ADC)
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 284.9h259.9"/><path fill-rule="evenodd" class="d" d="m702.8 319.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,333.9)"><tspan x="0" y="0" class="e">PB10
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 329.9h80"/><path fill-rule="evenodd" class="g" d="m885.8 317.9h49c1.6 0 3 1.4 3 3v18c0 1.7-1.4 3-3 3h-49c-1.7 0-3-1.3-3-3v-18c0-1.6 1.3-3 3-3z"/><text transform="translate(903.3,311.9)"><tspan x="0" y="0" class="h">R4
+</tspan></text><text transform="translate(901.1,333.9)"><tspan x="0" y="0" class="i">680
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 329.9h124.9"/><path fill-rule="evenodd" class="d" d="m702.8 364.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,378.9)"><tspan x="0" y="0" class="e">PB1
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 374.9h80"/><path fill-rule="evenodd" class="g" d="m885.8 362.9h49c1.6 0 3 1.4 3 3v18c0 1.7-1.4 3-3 3h-49c-1.7 0-3-1.3-3-3v-18c0-1.6 1.3-3 3-3z"/><text transform="translate(903.3,356.9)"><tspan x="0" y="0" class="h">R5
+</tspan></text><text transform="translate(898.1,378.9)"><tspan x="0" y="0" class="i">470k
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 374.9h124.9"/><path fill-rule="evenodd" class="A" d="m1062.7 284.9v90"/><text transform="translate(1144.7,333.9)"><tspan x="0" y="0" class="B">PROBE TP1 (Red)
+</tspan></text><path fill-rule="evenodd" class="C" d="m702.8 419.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,433.9)"><tspan x="0" y="0" class="D">PA6(ADC)
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 429.9h259.9"/><path fill-rule="evenodd" class="d" d="m702.8 464.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,478.9)"><tspan x="0" y="0" class="e">PB12
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 474.9h80"/><path fill-rule="evenodd" class="g" d="m885.8 462.9h49c1.6 0 3 1.3 3 3v18c0 1.6-1.4 3-3 3h-49c-1.7 0-3-1.4-3-3v-18c0-1.7 1.3-3 3-3z"/><text transform="translate(903.3,456.9)"><tspan x="0" y="0" class="h">R6
+</tspan></text><text transform="translate(901.1,478.9)"><tspan x="0" y="0" class="i">680
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 474.9h124.9"/><path fill-rule="evenodd" class="d" d="m702.8 509.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,523.9)"><tspan x="0" y="0" class="e">PB13
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 519.9h80"/><path fill-rule="evenodd" class="g" d="m885.8 507.9h49c1.6 0 3 1.3 3 3v18c0 1.6-1.4 3-3 3h-49c-1.7 0-3-1.4-3-3v-18c0-1.7 1.3-3 3-3z"/><text transform="translate(903.3,501.9)"><tspan x="0" y="0" class="h">R7
+</tspan></text><text transform="translate(898.1,523.9)"><tspan x="0" y="0" class="i">470k
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 519.9h124.9"/><path fill-rule="evenodd" class="A" d="m1062.7 429.9v90"/><path fill-rule="evenodd" class="E" d="m1062.7 524.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="F" d="m1062.7 474.9h70"/><path fill-rule="evenodd" class="G" d="m1132.7 462.9h150l15 12-15 12h-150z"/><text transform="translate(1144.7,478.9)"><tspan x="0" y="0" class="B">PROBE TP2 (Grn)
+</tspan></text><path fill-rule="evenodd" class="H" d="m702.8 564.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,578.9)"><tspan x="0" y="0" class="I">PA5(ADC)
+</tspan></text><path fill-rule="evenodd" class="F" d="m1062.7 329.9h70"/><path fill-rule="evenodd" class="A" d="m802.8 574.9h259.9"/><path fill-rule="evenodd" class="d" d="m702.8 609.9h85l15 10-15 10h-85z"/><text transform="translate(712.8,623.9)"><tspan x="0" y="0" class="e">PB14
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 619.9h80"/><path fill-rule="evenodd" class="g" d="m885.8 607.9h49c1.6 0 3 1.3 3 3v18c0 1.6-1.4 2.9-3 2.9h-49c-1.7 0-3-1.3-3-2.9v-18c0-1.7 1.3-3 3-3z"/><text transform="translate(903.3,601.9)"><tspan x="0" y="0" class="h">R8
+</tspan></text><text transform="translate(901.1,623.9)"><tspan x="0" y="0" class="i">680
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 619.9h124.9"/><path fill-rule="evenodd" class="d" d="m702.8 654.8h85l15 10-15 10h-85z"/><text transform="translate(712.8,668.8)"><tspan x="0" y="0" class="e">PB15
+</tspan></text><path fill-rule="evenodd" class="A" d="m802.8 664.8h80"/><path fill-rule="evenodd" class="g" d="m885.8 652.8h49c1.6 0 3 1.4 3 3v18c0 1.7-1.4 3-3 3h-49c-1.7 0-3-1.3-3-3v-18c0-1.6 1.3-3 3-3z"/><text transform="translate(903.3,646.8)"><tspan x="0" y="0" class="h">R9
+</tspan></text><text transform="translate(898.1,668.8)"><tspan x="0" y="0" class="i">470k
+</tspan></text><path fill-rule="evenodd" class="A" d="m937.8 664.8h124.9"/><path fill-rule="evenodd" class="A" d="m1062.7 574.9v89.9"/><path fill-rule="evenodd" class="E" d="m233.9 159.5c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 669.3c-2.4 0-4.5-2-4.5-4.5 0-2.4 2.1-4.5 4.5-4.5 2.5 0 4.5 2.1 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="F" d="m1062.7 619.9h70"/><path fill-rule="evenodd" class="J" d="m1132.7 607.9h150l15 12-15 11.9h-150z"/><text transform="translate(1144.7,623.9)"><tspan x="0" y="0" class="B">PROBE TP3 (Blue)
+</tspan></text><text transform="translate(170,497.9)"><tspan x="0" y="0" class="K">[3] PWM OUTPUT (PA8-PB3 / PWM / DC)
+</tspan></text><path fill-rule="evenodd" class="L" d="m39 524.9h85l15 10-15 10h-85z"/><text transform="translate(51,538.9)"><tspan x="0" y="0" class="M">PA8 (PWM)
+</tspan></text><path fill-rule="evenodd" class="A" d="m139 534.9h79.9"/><path fill-rule="evenodd" class="g" d="m221.9 522.9h49c1.7 0 3 1.3 3 3v18c0 1.6-1.3 3-3 3h-49c-1.6 0-3-1.4-3-3v-18c0-1.7 1.4-3 3-3z"/><text transform="translate(236.3,516.9)"><tspan x="0" y="0" class="h">R10
+</tspan></text><text transform="translate(240.3,538.9)"><tspan x="0" y="0" class="i">1k
+</tspan></text><path fill-rule="evenodd" class="A" d="m273.9 534.9h195"/><path fill-rule="evenodd" class="N" d="m469.9 521.9h150l14.9 12-14.9 12h-150z"/><text transform="translate(480.9,538.9)"><tspan x="0" y="0" class="B">SIG OUT
+</tspan></text><text transform="translate(177,573.9)"><tspan x="0" y="0" class="O">[4] SIGNAL GENERATOR / DAC (PB5)
+</tspan></text><path fill-rule="evenodd" class="P" d="m39 601.9h85l15 10-15 10h-85z"/><text transform="translate(51,615.9)"><tspan x="0" y="0" class="Q">PB5 (MOSI)
+</tspan></text><path fill-rule="evenodd" class="A" d="m139 611.9h31"/><path fill-rule="evenodd" class="g" d="m173 599.9h38.9c1.7 0 3 1.3 3 3v18c0 1.6-1.3 3-3 3h-38.9c-1.7 0-3-1.4-3-3v-18c0-1.7 1.3-3 3-3z"/><text transform="translate(182.7,593.9)"><tspan x="0" y="0" class="h">R11
+</tspan></text><text transform="translate(183.3,615.9)"><tspan x="0" y="0" class="i">330
+</tspan></text><path fill-rule="evenodd" class="A" d="m214.9 611.9h75"/><path fill-rule="evenodd" class="A" d="m239.9 611.9v19.9"/><path fill-rule="evenodd" class="f" d="m224.9 631.8h30"/><path fill-rule="evenodd" class="f" d="m224.9 637.8h30"/><path fill-rule="evenodd" class="A" d="m239.9 637.8v14"/><path fill-rule="evenodd" class="R" d="m224.9 651.8h30"/><path fill-rule="evenodd" class="p" d="m231.9 656.8h16"/><path fill-rule="evenodd" class="q" d="m236.9 661.8h6"/><text transform="translate(261.9,633.8)"><tspan x="0" y="0" class="h">C1
+</tspan></text><text transform="translate(261.9,646.8)"><tspan x="0" y="0" class="S">150pF
+</tspan></text><path fill-rule="evenodd" class="g" d="m292.9 599.9h39c1.7 0 3 1.3 3 3v18c0 1.6-1.3 3-3 3h-39c-1.6 0-3-1.4-3-3v-18c0-1.7 1.4-3 3-3z"/><text transform="translate(302.3,593.9)"><tspan x="0" y="0" class="h">R12
+</tspan></text><text transform="translate(306.3,615.9)"><tspan x="0" y="0" class="i">1k
+</tspan></text><path fill-rule="evenodd" class="A" d="m334.9 611.9h135"/><path fill-rule="evenodd" class="A" d="m369.9 611.9v19.9"/><path fill-rule="evenodd" class="f" d="m354.9 631.8h30"/><path fill-rule="evenodd" class="f" d="m354.9 637.8h30"/><path fill-rule="evenodd" class="A" d="m369.9 637.8v14"/><path fill-rule="evenodd" class="R" d="m354.9 651.8h30"/><path fill-rule="evenodd" class="p" d="m361.9 656.8h16"/><path fill-rule="evenodd" class="q" d="m366.9 661.8h6"/><text transform="translate(391.9,633.8)"><tspan x="0" y="0" class="h">C2
+</tspan></text><path fill-rule="evenodd" class="E" d="m233.9 389.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><text transform="translate(391.9,646.8)"><tspan x="0" y="0" class="S">68pF
+</tspan></text><path fill-rule="evenodd" class="T" d="m469.9 598.9h150l14.9 13-14.9 13h-150z"/><text transform="translate(480.9,615.9)"><tspan x="0" y="0" class="B">DAC OUT
+</tspan></text><path fill-rule="evenodd" class="E" d="m239.9 616.4c-2.4 0-4.5-2.1-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.4-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m369.9 616.4c-2.5 0-4.5-2.1-4.5-4.5 0-2.5 2-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.4-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 289.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 379.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 334.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 434.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 479.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 624.4c-2.4 0-4.5-2.1-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.4-2 4.5-4.5 4.5z"/><path fill-rule="evenodd" class="E" d="m1062.7 579.4c-2.4 0-4.5-2-4.5-4.5 0-2.5 2.1-4.5 4.5-4.5 2.5 0 4.5 2 4.5 4.5 0 2.5-2 4.5-4.5 4.5z"/></svg>

@@ -7,6 +7,7 @@
 #define COMP_NONE        0
 #define COMP_RESISTOR    10
 #define COMP_CAPACITOR   11
+#define COMP_INDUCTOR    12
 #define COMP_DIODE       20
 #define COMP_BJT         21
 #define COMP_MOSFET      22

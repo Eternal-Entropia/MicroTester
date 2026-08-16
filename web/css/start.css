@@ -217,33 +217,45 @@
     width: 0%;
 }
 
-/* Support & GitHub Fixed Buttons */
+/* Fixed Side Buttons (Support & GitHub) */
 .support-btn, .github-btn {
     position: fixed;
     bottom: 20px;
+    bottom: max(20px, env(safe-area-inset-bottom));
     z-index: 100;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
-    padding: 10px 16px;
+    padding: 10px 18px;
     border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 13px;
-    display: flex;
+    font-weight: 500;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     transition: var(--transition);
     text-decoration: none;
+    user-select: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
+
 .support-btn {
     left: 20px;
+    left: max(20px, env(safe-area-inset-left));
 }
+
 .github-btn {
     right: 20px;
+    right: max(20px, env(safe-area-inset-right));
 }
+
 .support-btn:hover, .github-btn:hover {
     border-color: var(--accent-primary);
     color: var(--text-accent);
+    background: var(--bg-card-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(56, 189, 248, 0.2);
 }
 
 /* Responsive */
@@ -257,5 +269,19 @@
     .flash-content {
         flex-direction: column;
         min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .support-btn, .github-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+        bottom: 12px;
+    }
+    .support-btn {
+        left: 12px;
+    }
+    .github-btn {
+        right: 12px;
     }
 }

@@ -318,6 +318,60 @@ uint8_t adc_sampler_get_session_id() {
     return currentConfig.sessionId;
 }
 
+void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t count, uint32_t rateKHz) {
+    #if defined(ARDUINO_ARCH_STM32)
+    adc_sampler_stop();
+    
+    int pin = mapPin(pinIndex);
+    pinMode(pin, INPUT_ANALOG);
+    analogRead(pin);
+    uint8_t channel = getAdcChannel(pin);
+    
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    
+    TIM2->CR1 = 0;
+    TIM2->PSC = 0;
+    uint32_t timerClk = 84000000;
+    uint32_t arr = (timerClk / (rateKHz * 1000)) - 1;
+    TIM2->ARR = arr;
+    TIM2->CR2 = (2 << 4); // TRGO on Update
+    
+    DMA2_Stream0->CR &= ~DMA_SxCR_EN;
+    while (DMA2_Stream0->CR & DMA_SxCR_EN);
+    
+    DMA2->LIFCR = 0x3D;
+    DMA2_Stream0->PAR = (uint32_t)&(ADC1->DR);
+    DMA2_Stream0->M0AR = (uint32_t)outBuf;
+    DMA2_Stream0->NDTR = count;
+    DMA2_Stream0->CR = (0 << 25) | DMA_SxCR_PL_1 | DMA_SxCR_MSIZE_0 | DMA_SxCR_PSIZE_0 | DMA_SxCR_MINC;
+    
+    ADC1->CR1 = ADC_CR1_SCAN;
+    ADC1->SQR1 = 0;
+    ADC1->SQR2 = 0;
+    ADC1->SQR3 = channel;
+    ADC1->SMPR2 &= ~(7 << (3 * channel));
+    
+    if (rateKHz >= 2000)      ADC1->SMPR2 |= (0 << (3 * channel)); // 3 cycles (0.357 us)
+    else if (rateKHz >= 1000) ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles (0.64 us)
+    else                      ADC1->SMPR2 |= (4 << (3 * channel)); // 84 cycles
+    
+    ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON;
+    
+    DMA2_Stream0->CR |= DMA_SxCR_EN;
+    TIM2->CR1 |= TIM_CR1_CEN;
+    
+    uint32_t timeout = 50000;
+    while (!(DMA2->LISR & DMA_LISR_TCIF0) && --timeout);
+    
+    TIM2->CR1 &= ~TIM_CR1_CEN;
+    DMA2_Stream0->CR &= ~DMA_SxCR_EN;
+    while (DMA2_Stream0->CR & DMA_SxCR_EN);
+    ADC1->CR2 = 0; // Disable ADC DMA bit so normal analogRead works cleanly
+    #endif
+}
+
 uint8_t adc_sampler_get_channel_mask() {
     if (!isMultiCh) return 0;  // Single-channel (and ETS) frames don't carry mask
     uint8_t m = 0;

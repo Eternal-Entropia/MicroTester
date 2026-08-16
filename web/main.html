@@ -6,6 +6,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MicroTester - Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="img/icon.svg">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="stylesheet" href="css/common.css">
     <link rel="stylesheet" href="css/main.css">
     <style>
@@ -178,6 +184,7 @@
                         </svg>
                     </span>
                     <span>Voltmeter</span>
+                    <div class="bg-indicator" id="voltIndicator"></div>
                 </button>
                 <button class="nav-item" data-panel="oscilloscope" title="Oscilloscope">
                     <span class="nav-item-icon">
@@ -187,6 +194,7 @@
                         </svg>
                     </span>
                     <span>Oscilloscope</span>
+                    <div class="bg-indicator" id="oscIndicator"></div>
                 </button>
                 <button class="nav-item" data-panel="component" title="Component Tester">
                     <span class="nav-item-icon">
@@ -197,6 +205,7 @@
                         </svg>
                     </span>
                     <span>Component Tester</span>
+                    <div class="bg-indicator" id="compIndicator"></div>
                 </button>
 
                 <button class="nav-item" data-panel="freqresp" title="Frequency Response">
@@ -754,6 +763,17 @@
                                     • Pinout (G, D, S) & Body Diode Vf
                                 </div>
                             </div>
+                            <div
+                                style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px;">
+                                <div
+                                    style="font-weight: 700; color: #38bdf8; font-size: 13px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                    <span>Inductors & Coils</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+                                    • Inductance (L): 10 µH .. 1000 H<br>
+                                    • DC Resistance (Rdc), Q Factor & Reactance (XL)
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -842,17 +862,12 @@
                                 <div class="config-field">
                                     <label>Output Pin</label>
                                     <select id="cfgSigPin">
-                                        <option value="0" selected>PA8 (TIM1_CH1)</option>
+                                        <option value="0" selected>PA8 (TIM1_CH1 — Dedicated Output)</option>
                                         <option value="1">PA9 (TIM1_CH2)</option>
                                         <option value="2">PA10 (TIM1_CH3)</option>
                                         <option value="3">PB0 (TIM3_CH3)</option>
-                                        <option value="4">PB1 (TIM3_CH4)</option>
-                                        <option value="5">PB6 (TIM4_CH1)</option>
-                                        <option value="6">PB7 (TIM4_CH2)</option>
-                                        <option value="7">PB8 (TIM4_CH3)</option>
                                         <option value="8">PA0 (TIM2_CH1)</option>
                                         <option value="9">PB3 (TIM2_CH2)</option>
-                                        <option value="10">PB9 (TIM4_CH4)</option>
                                     </select>
                                 </div>
                                 <div class="config-field">
@@ -1342,11 +1357,21 @@
             <script src="js/app.js"></script>
             <script src="js/usb_protocol.js"></script>
             <script src="js/calibration.js"></script>
-            <script src="js/voltmeter.js"></script>
-            <script src="js/oscilloscope.js"></script>
+            <script src="js/voltmeter.js?v=3"></script>
+            <script src="js/oscilloscope.js?v=3"></script>
             <script src="js/siggen.js"></script>
             <script src="js/pwmdac.js"></script>
-            <script src="js/comp_tester.js"></script>
+            <script src="js/comp_tester.js?v=14"></script>
+
+            <script>
+                if ('serviceWorker' in navigator) {
+                    window.addEventListener('load', () => {
+                        navigator.serviceWorker.register('sw.js')
+                            .then((reg) => console.log('[PWA] Service Worker registered successfully:', reg.scope))
+                            .catch((err) => console.warn('[PWA] Service Worker registration failed:', err));
+                    });
+                }
+            </script>
 
 </body>
 

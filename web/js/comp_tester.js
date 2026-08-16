@@ -21,11 +21,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnSmallCap) btnSmallCap.disabled = !microTester.device || testing;
     }, 1000);
     
+    function updateCompIndicator(active) {
+        const compIndicator = document.getElementById('compIndicator');
+        if (compIndicator) {
+            if (active) compIndicator.classList.add('active');
+            else compIndicator.classList.remove('active');
+        }
+    }
+
+    function stopActiveInstruments() {
+        if (typeof window.stopVoltmeter === 'function') window.stopVoltmeter();
+        if (typeof window.stopOsc === 'function') window.stopOsc();
+    }
+
     // Start test (Normal)
     if (btnTest) {
         btnTest.addEventListener('click', () => {
             if (!microTester.device) return alert('Connect USB first!');
+            stopActiveInstruments();
             testing = true;
+            updateCompIndicator(true);
             statusEl.innerText = '🔄 Testing...';
             statusEl.className = 'comp-status testing';
             resultArea.style.display = 'none';
@@ -36,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 if (testing) {
                     testing = false;
+                    updateCompIndicator(false);
                     statusEl.innerText = '⏱ Timeout — no response';
                     statusEl.className = 'comp-status error';
                     btnTest.disabled = false;
@@ -49,7 +65,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnSmallCap) {
         btnSmallCap.addEventListener('click', () => {
             if (!microTester.device) return alert('Connect USB first!');
+            stopActiveInstruments();
             testing = true;
+            updateCompIndicator(true);
             statusEl.innerText = '⚡ Testing Small Cap...';
             statusEl.className = 'comp-status testing';
             resultArea.style.display = 'none';
@@ -59,6 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 if (testing) {
                     testing = false;
+                    updateCompIndicator(false);
                     statusEl.innerText = '⏱ Timeout — no response';
                     statusEl.className = 'comp-status error';
                     btnTest.disabled = false;
@@ -73,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnStop.addEventListener('click', () => {
             microTester.sendCommand(CMD_COMP_STOP);
             testing = false;
+            updateCompIndicator(false);
             statusEl.innerText = 'Cancelled';
             statusEl.className = 'comp-status idle';
             btnTest.disabled = false;
@@ -88,11 +108,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const pktLen = data[1] | (data[2] << 8);
         
         if (pktType !== PKT_COMP_RESULT) return;
-        if (data.length < 3 + 16) return;
+        // CompResult payload = 18 usable bytes + 2 struct padding (ARM EABI);
+        // firmware reports sizeof() in the header. Floored at 18 so flags is readable.
+        const resultLen = Math.min(Math.max(pktLen, 18), 32);
+        if (data.length < 3 + resultLen) return;
         
-        const payload = data.slice(3, 3 + 16);
+        const payload = data.slice(3, 3 + resultLen);
         const result = parseCompResult(payload);
         testing = false;
+        updateCompIndicator(false);
         btnTest.disabled = false;
         displayResult(result);
     });
@@ -107,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
             value1: dv.getUint32(4, true),
             value2: dv.getUint32(8, true),
             value3: (dv.byteLength >= 16) ? dv.getUint32(12, true) : 0,
-            flags: (dv.byteLength >= 18) ? dv.getUint16(16, true) : ((dv.byteLength >= 14) ? dv.getUint16(12, true) : 0)
+            flags: (dv.byteLength >= 18) ? dv.getUint16(16, true) : 0
         };
     }
     
@@ -123,6 +147,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pF >= 1000000) return (pF / 1000000).toFixed(2) + ' µF';
         if (pF >= 1000) return (pF / 1000).toFixed(2) + ' nF';
         return pF + ' pF';
+    }
+
+    function formatInductance(uH) {
+        if (uH >= 1000000) return (uH / 1000000).toFixed(2) + ' H';
+        if (uH >= 1000) return (uH / 1000).toFixed(2) + ' mH';
+        if (uH >= 1) return uH.toFixed(2) + ' µH';
+        return (uH * 1000).toFixed(0) + ' nH';
     }
     
     function displayResult(r) {
@@ -187,6 +218,56 @@ document.addEventListener('DOMContentLoaded', () => {
                 value = formatCapacitance(r.value1);
                 if (r.value2 > 0) secondary = `ESR: ${(r.value2/100).toFixed(1)} Ω (1 kHz)`;
                 probeMap = `+ ${probeLabels[r.pinA]}  — ${probeLabels[r.pinB]}`;
+                statusEl.innerText = 'Component identified';
+                statusEl.className = 'comp-status success';
+                break;
+            case 12: // COMP_INDUCTOR
+                icon = `<svg viewBox="0 0 56 32" width="56" height="32" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"><path d="M 3 20 L 11 20 C 11 8, 20 8, 20 20 C 20 8, 29 8, 29 20 C 29 8, 38 8, 38 20 C 38 8, 47 8, 47 20 L 53 20"/></svg>`;
+                typeName = 'Inductor';
+                
+                // r.value1 is transmitted in nH (nano-Henries) to preserve decimal precision (1 uH = 1000 nH)
+                let L_nH = r.value1;
+                let L_uH = L_nH / 1000.0;
+                value = formatInductance(L_uH);
+                
+                let rOffset2 = 0;
+                let rlA2 = 680, rlB2 = 680;
+                if (typeof window.Calibration !== 'undefined') {
+                    if (window.Calibration.compOffsetR) rOffset2 = window.Calibration.compOffsetR;
+                    if (window.Calibration.compRL) {
+                        rlA2 = window.Calibration.compRL[r.pinA] || 680;
+                        rlB2 = window.Calibration.compRL[r.pinB] || 680;
+                    }
+                }
+                
+                // Scale Rdc with RL calibration and subtract probe lead resistance (identical to Resistor)
+                let scaleRdc2 = (rlA2 + rlB2) / 1360.0;
+                let rawRdcVal2 = Math.max(0, (r.value2 * scaleRdc2) - rOffset2);
+                let Rdc2 = rawRdcVal2 / 100.0;
+                
+                let freqHz = r.value3 || 100000;
+                let L_henry = L_uH / 1000000.0;
+                
+                // Inductive Reactance XL = 2 * pi * f * L
+                let XL = 2.0 * Math.PI * freqHz * L_henry;
+                let xlStr = (XL >= 1000) ? (XL / 1000).toFixed(1) + ' kΩ' : XL.toFixed(1) + ' Ω';
+                
+                // Estimated Self-Resonant Frequency (SRF / f_res) with parasitic C ~ 30 pF
+                let fRes = 1.0 / (2.0 * Math.PI * Math.sqrt(L_henry * 30.0e-12));
+                let fResStr = (fRes >= 1000000) ? (fRes / 1000000).toFixed(2) + ' MHz' : (fRes >= 1000) ? (fRes / 1000).toFixed(1) + ' kHz' : fRes.toFixed(0) + ' Hz';
+                
+                let testFreqStr = (freqHz >= 1000000) ? (freqHz / 1000000).toFixed(0) + ' MHz' : (freqHz >= 1000) ? (freqHz / 1000).toFixed(0) + ' kHz' : freqHz + ' Hz';
+                
+                if (Rdc2 < 0.05) {
+                    secondary = `R_dc: < 0.1 Ω  |  X_L = ${xlStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
+                } else {
+                    let fKHz = freqHz / 1000.0;
+                    let rac = Rdc2 * (1.0 + 0.15 * Math.sqrt(fKHz));
+                    let Q = XL / rac;
+                    let qStr = (Q >= 100) ? Q.toFixed(0) : Q.toFixed(1);
+                    secondary = `R_dc: ${Rdc2.toFixed(2)} Ω  |  X_L = ${xlStr}  |  Q = ${qStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
+                }
+                probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';
                 break;
@@ -317,6 +398,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (r.type === 11) { // Capacitor
                 resultPinout.innerHTML = buildCapacitorDiagram(r.pinA, r.pinB, r.value1);
                 resultPinout.style.display = 'block';
+            } else if (r.type === 12) { // Inductor
+                resultPinout.innerHTML = buildInductorDiagram(r.pinA, r.pinB, r.value1 / 1000.0);
+                resultPinout.style.display = 'block';
             } else if (r.type === 20) { // Diode
                 resultPinout.innerHTML = buildDiodeDiagram(r.pinA, r.pinB);
                 resultPinout.style.display = 'block';
@@ -403,7 +487,22 @@ document.addEventListener('DOMContentLoaded', () => {
             <!-- Pin labels -->
             <text x="5" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="start">${probes[leftPin]}</text>
             <text x="215" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="end">${probes[rightPin]}</text>
-            <text x="110" y="82" fill="#94a3b8" font-size="11" font-weight="600" text-anchor="middle">Capacitor</text>
+            <text x="110" y="80" fill="#38bdf8" font-size="12" font-weight="bold" text-anchor="middle">${formatCapacitance(pF)}</text>
+        </svg>`;
+    }
+
+    function buildInductorDiagram(pinA, pinB, uH) {
+        const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
+        return `<svg viewBox="0 0 220 90" class="comp-schematic">
+            <line x1="20" y1="45" x2="50" y2="45" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M50 45 C50 22, 70 22, 70 45 C70 22, 90 22, 90 45 C90 22, 110 22, 110 45 C110 22, 130 22, 130 45 C130 22, 150 22, 150 45 C150 22, 170 22, 170 45" fill="none" stroke="#38bdf8" stroke-width="2.5"/>
+            <line x1="170" y1="45" x2="200" y2="45" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="20" cy="45" r="4" fill="#38bdf8"/>
+            <circle cx="200" cy="45" r="4" fill="#38bdf8"/>
+            <!-- Pin labels -->
+            <text x="5" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="start">${probes[pinA]}</text>
+            <text x="215" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="end">${probes[pinB]}</text>
+            <text x="110" y="80" fill="#38bdf8" font-size="12" font-weight="bold" text-anchor="middle">L = ${formatInductance(uH)}</text>
         </svg>`;
     }
 

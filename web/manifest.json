@@ -1,0 +1,19 @@
+{
+  "name": "MicroTester",
+  "short_name": "MicroTester",
+  "description": "STM32 Oscilloscope, Component Tester, Signal Generator & Voltmeter",
+  "start_url": "start.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1120",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "img/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
