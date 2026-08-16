@@ -20,6 +20,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
   - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
   - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
   - **MOSFETs (N-Ch / P-Ch)**: $V_{th}$, Gate Capacitance ($C_g$), $R_{ds(on)}$, Pinout (G, D, S), and Body Diode $V_f$
+  - **Inductors & Coils**: • Inductance (L): 10 µH .. 1000 H • DC Resistance (Rdc), Q Factor & Reactance (XL)
 
 ---
 
@@ -51,6 +52,7 @@ ETS work on aliasing signals.
 
 beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
 
+beta v5: added PWA and icon. added inductors in component tester. minor fix
 
 
 Lib usage in project:
