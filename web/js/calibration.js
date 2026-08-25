@@ -226,8 +226,11 @@ window.Calibration = {
         const vddaMv = Math.round((this.vDda || 3.30) * 1000);
         const rl = (this.compRL || [680, 680, 680]).map(v => Math.round((v || 680) * 10)); // into 0.1 ohm units
         const rh = (this.compRH || [470000, 470000, 470000]).map(v => Math.round(v || 470000)); // in 1 ohm units
+        // ESR zero: loop switch+lead resistance from probe-short calibration.
+        // compOffsetR is stored in 0.01 ohm units - same unit used by firmware
+        const esrZeroX100 = Math.min(65000, Math.max(0, Math.round(this.compOffsetR || 0)));
 
-        const buf = new Uint8Array(20);
+        const buf = new Uint8Array(22);
         buf[0] = vddaMv & 0xFF;
         buf[1] = (vddaMv >> 8) & 0xFF;
         buf[2] = rl[0] & 0xFF; buf[3] = (rl[0] >> 8) & 0xFF;
@@ -241,9 +244,28 @@ window.Calibration = {
             buf[idx + 2] = (v >> 16) & 0xFF;
             buf[idx + 3] = (v >> 24) & 0xFF;
         }
+        buf[20] = esrZeroX100 & 0xFF;
+        buf[21] = (esrZeroX100 >> 8) & 0xFF;
 
         microTester.sendCommand(0x52 /* CMD_COMP_SET_CAL */, buf);
-        console.log("Sent CMD_COMP_SET_CAL to STM32:", { vddaMv, rl, rh });
+        console.log("Sent CMD_COMP_SET_CAL to STM32:", { vddaMv, rl, rh, esrZeroX100 });
+    },
+
+    // Store a software zero offset from a probe-referred voltage reading
+    // (e.g. average of a captured frame with shorted probe).
+    calibrateZero: function(biasEnabled, channel, probeVolts) {
+        if (channel >= 0 && channel <= 4 && typeof probeVolts === 'number' && !isNaN(probeVolts)) {
+            const divider = biasEnabled ? (this.dividerOn[channel] || 21.0) : (this.dividerOff[channel] || 11.0);
+            // Convert probe-referred volts to ADC pin volts (virtual zero)
+            const vz = (biasEnabled ? this.vDda / 2.0 : 0.0) + probeVolts / divider;
+            if (biasEnabled) {
+                this.biasOffsets[channel] = vz;
+                localStorage.setItem('microtester_unified_bias_offsets', JSON.stringify(this.biasOffsets));
+            } else {
+                this.zeroOffsets[channel] = vz;
+                localStorage.setItem('microtester_unified_zero_offsets', JSON.stringify(this.zeroOffsets));
+            }
+        }
     },
 
     resetZero: function(biasEnabled, channel) {
@@ -266,7 +288,7 @@ window.Calibration = {
         }
     },
 
-    calculateVolts: function(biasEnabled, channel, rawAdc, resolution, divider, freqComp = 0) {
+    calculateVolts: function(biasEnabled, channel, rawAdc, resolution, divider, freqComp = 0, zeroOverride = null) {
         const adcMax = (resolution === 12) ? 4095 : 255;
         let pinVolts = (rawAdc / adcMax) * this.vDda;
         
@@ -284,7 +306,12 @@ window.Calibration = {
         }
         
         if (biasEnabled && vz === 0) {
-            vz = (this.vDda * 10.0) / actualDivider;
+            vz = this.vDda / 2.0; // Theoretical mid-rail bias point at the ADC pin
+        }
+
+        // Per-sample-rate oscilloscope zero override (highest priority)
+        if (typeof zeroOverride === 'number' && !isNaN(zeroOverride)) {
+            vz = zeroOverride;
         }
         
         let probeVolts = (pinVolts - vz) * actualDivider;
@@ -469,6 +496,8 @@ window.Calibration = {
         let rawOffShort = 0;
         let rawOnShort = 0;
         let rawOnOpen = 0;
+        let probeSummary = '';
+        let zeroNote = '';
 
         const chName = `CH${channel + 1} (PA${channel + 1})`;
         if (chLabel) chLabel.innerText = chName;
@@ -477,7 +506,7 @@ window.Calibration = {
             currentStep = 1;
             if (stepDesc) {
                 stepDesc.style.display = 'block';
-                stepDesc.innerHTML = `Step 1 of 2: Please short probe <strong style="color: #38bdf8;">${chName}</strong> firmly to Ground (GND).`;
+                stepDesc.innerHTML = `Step 1 of 3: Please short probe <strong style="color: #38bdf8;">${chName}</strong> firmly to Ground (GND).`;
             }
             if (progContainer) progContainer.style.display = 'none';
             if (resultsEl) resultsEl.style.display = 'none';
@@ -516,7 +545,7 @@ window.Calibration = {
         this.requestVrefPromise().then((freshVdda) => {
             if (progContainer) progContainer.style.display = 'none';
             if (stepDesc) {
-                stepDesc.innerHTML = `<div style="color: #4ade80; margin-bottom: 8px; font-weight: 600;">✓ Current V<sub>DDA</sub> measured: <strong>${freshVdda.toFixed(3)} V</strong></div>Step 1 of 2: Please short probe <strong style="color: #38bdf8;">${chName}</strong> firmly to Ground (GND).`;
+                stepDesc.innerHTML = `<div style="color: #4ade80; margin-bottom: 8px; font-weight: 600;">✓ Current V<sub>DDA</sub> measured: <strong>${freshVdda.toFixed(3)} V</strong></div>Step 1 of 3: Please short probe <strong style="color: #38bdf8;">${chName}</strong> firmly to Ground (GND).`;
             }
             if (btnNext) btnNext.disabled = false;
         }).catch(() => {
@@ -538,12 +567,12 @@ window.Calibration = {
                 if (progContainer) progContainer.style.display = 'block';
 
                 try {
-                    if (statusText) statusText.innerText = "1/2: Measuring Zero Offset (Bias OFF)...";
+                    if (statusText) statusText.innerText = "1/3: Measuring Zero Offset (Bias OFF)...";
                     rawOffShort = await this._sampleRawPromise(channel, false, 16384, pct => {
                         if (progressBar) progressBar.style.width = (pct * 0.5) + '%';
                     });
 
-                    if (statusText) statusText.innerText = "1/2: Measuring Short Offset (Bias ON)...";
+                    if (statusText) statusText.innerText = "1/3: Measuring Short Offset (Bias ON)...";
                     rawOnShort = await this._sampleRawPromise(channel, true, 16384, pct => {
                         if (progressBar) progressBar.style.width = (50 + pct * 0.5) + '%';
                     });
@@ -551,7 +580,7 @@ window.Calibration = {
                     currentStep = 2;
                     if (progContainer) progContainer.style.display = 'none';
                     if (stepDesc) {
-                        stepDesc.innerHTML = `Step 2 of 2: Please disconnect probe <strong style="color: #38bdf8;">${chName}</strong> (leave it floating / open circuit).`;
+                        stepDesc.innerHTML = `Step 2 of 3: Please disconnect probe <strong style="color: #38bdf8;">${chName}</strong> (leave it floating / open circuit).`;
                     }
                     btnNext.disabled = false;
                     btnCancel.disabled = false;
@@ -565,7 +594,7 @@ window.Calibration = {
                 if (progContainer) progContainer.style.display = 'block';
 
                 try {
-                    if (statusText) statusText.innerText = "2/2: Measuring Open Circuit (Bias ON)...";
+                    if (statusText) statusText.innerText = "2/3: Measuring Open Circuit (Bias ON)...";
                     rawOnOpen = await this._sampleRawPromise(channel, true, 16384, pct => {
                         if (progressBar) progressBar.style.width = pct + '%';
                     });
@@ -607,32 +636,108 @@ window.Calibration = {
                     localStorage.setItem('microtester_divider_on', JSON.stringify(this.dividerOn));
                     localStorage.setItem('microtester_gain_correction', JSON.stringify(this.gainCorrection));
 
-                    currentStep = 3;
-                    if (progContainer) progContainer.style.display = 'none';
-                    if (stepDesc) stepDesc.style.display = 'none';
+                    probeSummary =
+                        `<div>• Zero Offset (Bias OFF): <strong>${v0 >= 0 ? '+' : ''}${v0.toFixed(3)} V</strong></div>` +
+                        `<div>• Bias Offset (Bias ON):  <strong>${v1 >= 0 ? '+' : ''}${v1.toFixed(3)} V</strong></div>` +
+                        `<div>• Calibrated Divider OFF: <strong>${divOff.toFixed(2)}x</strong> (Nominal 11.0x)</div>` +
+                        `<div>• Calibrated Divider ON:  <strong>${divOn.toFixed(2)}x</strong> (Nominal 21.0x)</div>` +
+                        `<div>• Gain Factor: <strong>${gainCorr.toFixed(4)}</strong></div>`;
 
-                    if (resultsEl) {
-                        resultsEl.innerHTML = `
-                            <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Calibration Successful for ${chName}!</div>
-                            <div>• Zero Offset (Bias OFF): <strong>${v0 >= 0 ? '+' : ''}${v0.toFixed(3)} V</strong></div>
-                            <div>• Bias Offset (Bias ON):  <strong>${v1 >= 0 ? '+' : ''}${v1.toFixed(3)} V</strong></div>
-                            <div>• Calibrated Divider OFF: <strong>${divOff.toFixed(2)}x</strong> (Nominal 11.0x)</div>
-                            <div>• Calibrated Divider ON:  <strong>${divOn.toFixed(2)}x</strong> (Nominal 21.0x)</div>
-                            <div>• Gain Factor: <strong>${gainCorr.toFixed(4)}</strong></div>
-                        `;
-                        resultsEl.style.display = 'block';
+                    // Step 3: oscilloscope zero calibration (only for the ±30V range)
+                    const voltRangeSel = document.getElementById('cfgOscVoltRange');
+                    const is30V = !voltRangeSel || voltRangeSel.value === '±30';
+                    const runRateZero = window.OscilloscopeCalibration && window.OscilloscopeCalibration.runRateZeroCalibration;
+
+                    if (!is30V) {
+                        zeroNote = `<div style="color:#f59e0b">• Oscilloscope zero: skipped (Voltage Range is not ±30V)</div>`;
+                        await this._finishCalibWizard(chName, probeSummary, zeroNote);
+                        currentStep = 4;
+                        return;
+                    }
+                    if (!runRateZero) {
+                        zeroNote = `<div style="color:#f59e0b">• Oscilloscope zero: skipped (module not loaded)</div>`;
+                        await this._finishCalibWizard(chName, probeSummary, zeroNote);
+                        currentStep = 4;
+                        return;
                     }
 
-                    btnNext.innerText = 'Done ✔';
+                    currentStep = 3;
+                    if (progContainer) progContainer.style.display = 'none';
+                    if (stepDesc) {
+                        stepDesc.style.display = 'block';
+                        stepDesc.innerHTML = `Step 3 of 3: Please <strong style="color:#f59e0b;">DISCONNECT</strong> probe <strong style="color: #38bdf8;">${chName}</strong> (leave it floating — do <strong style="color:#ef4444;">NOT</strong> short it to Ground).<br><span style="color:#94a3b8; font-size:12px;">This calibrates the oscilloscope zero for ALL modes — 12/8-bit, every sample rate, BIAS ON and OFF.</span>`;
+                    }
                     btnNext.disabled = false;
+                    btnCancel.disabled = false;
                 } catch (e) {
                     alert("Calibration failed: " + e.message);
                     closeModalWizard();
                 }
             } else if (currentStep === 3) {
+                btnNext.disabled = true;
+                btnCancel.disabled = true;
+                if (progContainer) progContainer.style.display = 'block';
+
+                try {
+                    const run = window.OscilloscopeCalibration.runRateZeroCalibration;
+                    const parsePct = (msg) => {
+                        const m = msg.match(/\((\d+)\/(\d+)\)/);
+                        return m ? (+m[1]) / (+m[2]) : null;
+                    };
+
+                    if (statusText) statusText.innerText = "3/3 (BIAS ON): starting...";
+                    await run(channel, (msg) => {
+                        if (statusText) statusText.innerText = "3/3 (BIAS ON): " + msg;
+                        const p = parsePct(msg);
+                        if (p !== null && progressBar) progressBar.style.width = (p * 50) + '%';
+                    }, { bias: true, skipBusyCheck: true });
+
+                    if (statusText) statusText.innerText = "3/3 (BIAS OFF): starting...";
+                    await run(channel, (msg) => {
+                        if (statusText) statusText.innerText = "3/3 (BIAS OFF): " + msg;
+                        const p = parsePct(msg);
+                        if (p !== null && progressBar) progressBar.style.width = (50 + p * 50) + '%';
+                    }, { bias: false, skipBusyCheck: true });
+
+                    if (progressBar) progressBar.style.width = '100%';
+                    zeroNote = `<div>• Oscilloscope zero: calibrated for all modes (BIAS ON &amp; OFF)</div>`;
+
+                    await this._finishCalibWizard(chName, probeSummary, zeroNote);
+                    currentStep = 4;
+                } catch (e) {
+                    alert("Calibration failed: " + e.message);
+                    closeModalWizard();
+                }
+            } else if (currentStep === 4) {
                 closeModalWizard();
             }
         };
+    },
+
+    // Shows the final results screen of the calibration wizard
+    _finishCalibWizard: function(chName, probeSummary, zeroNote) {
+        const modal = document.getElementById('modalUnifiedCalib');
+        const stepDesc = document.getElementById('calibModalStepDesc');
+        const progContainer = document.getElementById('calibModalProgressContainer');
+        const resultsEl = document.getElementById('calibModalResults');
+        const btnNext = document.getElementById('btnCalibModalNext');
+        const btnCancel = document.getElementById('btnCalibModalCancel');
+
+        if (progContainer) progContainer.style.display = 'none';
+        if (stepDesc) stepDesc.style.display = 'none';
+        if (resultsEl) {
+            resultsEl.innerHTML = `
+                <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Calibration Successful for ${chName}!</div>
+                ${probeSummary}
+                ${zeroNote}
+            `;
+            resultsEl.style.display = 'block';
+        }
+        if (btnNext) {
+            btnNext.innerText = 'Done ✔';
+            btnNext.disabled = false;
+        }
+        if (btnCancel) btnCancel.disabled = false;
     }
 };
 

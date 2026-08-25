@@ -1,5 +1,25 @@
 // Component Tester Controller for MicroTester
 
+// Oversampling (128..1024) persisted from the Settings panel
+function getCompOversample() {
+    const v = parseInt(localStorage.getItem('microtester_comp_oversample'), 10);
+    if (isNaN(v) || v < 128 || v > 1024) return 128;
+    return v;
+}
+
+// Xc calculation frequency (Hz), persisted from the Settings panel (PC-side only)
+function getCompXcFreq() {
+    const v = parseInt(localStorage.getItem('microtester_comp_xc_freq'), 10);
+    if (isNaN(v) || v < 1 || v > 1000000) return 120;
+    return v;
+}
+
+// Payload: [mode, oversampleLo, oversampleHi] (firmware falls back to 128 on short payloads)
+function buildCompTestPayload(mode) {
+    const ov = getCompOversample();
+    return new Uint8Array([mode, ov & 0xFF, (ov >> 8) & 0xFF]);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const btnTest = document.getElementById('btnCompTest');
     const btnStop = document.getElementById('btnCompStop');
@@ -34,6 +54,39 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.stopOsc === 'function') window.stopOsc();
     }
 
+    // --- Oversampling setting (Settings panel) ---
+    const cfgCompOversample = document.getElementById('cfgCompOversample');
+    if (cfgCompOversample) {
+        const savedOv = localStorage.getItem('microtester_comp_oversample');
+        if (savedOv) cfgCompOversample.value = savedOv;
+        cfgCompOversample.addEventListener('change', () => {
+            let v = parseInt(cfgCompOversample.value, 10);
+            if (isNaN(v) || v < 128 || v > 1024) v = 128;
+            cfgCompOversample.value = String(v);
+            localStorage.setItem('microtester_comp_oversample', String(v));
+        });
+    }
+
+    // --- Xc calculation frequency (Settings panel, PC-side only) ---
+    const cfgCompFreq = document.getElementById('cfgCompFreq');
+    if (cfgCompFreq) {
+        const savedFreq = localStorage.getItem('microtester_comp_xc_freq');
+        if (savedFreq) cfgCompFreq.value = savedFreq;
+        const applyFreqInput = () => {
+            let v = parseInt(cfgCompFreq.value, 10);
+            if (isNaN(v)) v = 120;
+            if (v < 1) v = 1;
+            if (v > 1000000) v = 1000000;
+            cfgCompFreq.value = String(v);
+            localStorage.setItem('microtester_comp_xc_freq', String(v));
+        };
+        cfgCompFreq.addEventListener('change', applyFreqInput);
+        // Also apply on Enter without blurring
+        cfgCompFreq.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyFreqInput();
+        });
+    }
+
     // Start test (Normal)
     if (btnTest) {
         btnTest.addEventListener('click', () => {
@@ -46,8 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
             resultArea.style.display = 'none';
             btnTest.disabled = true;
             if (btnSmallCap) btnSmallCap.disabled = true;
-            microTester.sendCommand(CMD_COMP_TEST, new Uint8Array([0])); // Mode = 0
-            // Timeout after 40 seconds (allows large capacitor charging & discharging)
+            microTester.sendCommand(CMD_COMP_TEST, buildCompTestPayload(0)); // Mode = 0 (auto test)
+            // Timeout after 60 seconds (allows large capacitor charging & higher oversampling)
             setTimeout(() => {
                 if (testing) {
                     testing = false;
@@ -57,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     btnTest.disabled = false;
                     if (btnSmallCap) btnSmallCap.disabled = false;
                 }
-            }, 40000);
+            }, 60000);
         });
     }
 
@@ -73,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             resultArea.style.display = 'none';
             btnTest.disabled = true;
             btnSmallCap.disabled = true;
-            microTester.sendCommand(CMD_COMP_TEST, new Uint8Array([1])); // Mode = 1
+            microTester.sendCommand(CMD_COMP_TEST, buildCompTestPayload(1)); // Mode = 1 (small cap)
             setTimeout(() => {
                 if (testing) {
                     testing = false;
@@ -81,9 +134,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     statusEl.innerText = '⏱ Timeout — no response';
                     statusEl.className = 'comp-status error';
                     btnTest.disabled = false;
-                    btnSmallCap.disabled = false;
+                    if (btnSmallCap) btnSmallCap.disabled = false;
                 }
-            }, 40000);
+            }, 60000);
         });
     }
 
@@ -216,7 +269,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><line x1="3" y1="12" x2="10" y2="12"/><line x1="10" y1="5" x2="10" y2="19" stroke-width="3"/><line x1="14" y1="5" x2="14" y2="19" stroke-width="3"/><line x1="14" y1="12" x2="21" y2="12"/></svg>`;
                 typeName = 'Capacitor';
                 value = formatCapacitance(r.value1);
-                if (r.value2 > 0) secondary = `ESR: ${(r.value2/100).toFixed(1)} Ω (1 kHz)`;
+                // Secondary (value2): ESR*100 @ 120 Hz; Tertiary (value3): tan(delta)*10000 @ 120 Hz
+                if (r.value2 > 0) {
+                    secondary = `ESR @ 120 Hz: ${(r.value2 / 100).toFixed(2)} Ω`;
+                    if (r.value3 > 0) {
+                        const td = r.value3 / 10000;
+                        const q = td > 0 ? (1 / td) : Infinity;
+                        secondary += `  |  tan δ: ${td.toFixed(3)} (Q ≈ ${q >= 100 ? '≥100' : q.toFixed(1)})`;
+                    }
+                }
+                // Reactive resistance on PC: Xc = 1 / (2*PI*f*C), f from Settings
+                if (r.value1 > 0) {
+                    const xcFreq = getCompXcFreq();
+                    const cFarad = r.value1 * 1e-12;
+                    const xcOhm = 1.0 / (2.0 * Math.PI * xcFreq * cFarad);
+                    const xcStr = `Xc: ${formatResistance(xcOhm * 100)} @ ${xcFreq} Hz`;
+                    secondary = secondary ? `${secondary}  |  ${xcStr}` : xcStr;
+                }
                 probeMap = `+ ${probeLabels[r.pinA]}  — ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';
@@ -248,9 +317,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 let freqHz = r.value3 || 100000;
                 let L_henry = L_uH / 1000000.0;
                 
-                // Inductive Reactance XL = 2 * pi * f * L
-                let XL = 2.0 * Math.PI * freqHz * L_henry;
-                let xlStr = (XL >= 1000) ? (XL / 1000).toFixed(1) + ' kΩ' : XL.toFixed(1) + ' Ω';
+                // Reactive resistance on PC: XL = 2*PI*f*L, f from Settings
+                const xlFreq = getCompXcFreq();
+                const XLs = 2.0 * Math.PI * xlFreq * L_henry;
+                let xlStr = `X_L: ${formatResistance(XLs * 100)} @ ${xlFreq} Hz`;
                 
                 // Estimated Self-Resonant Frequency (SRF / f_res) with parasitic C ~ 30 pF
                 let fRes = 1.0 / (2.0 * Math.PI * Math.sqrt(L_henry * 30.0e-12));
@@ -261,9 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (Rdc2 < 0.05) {
                     secondary = `R_dc: < 0.1 Ω  |  X_L = ${xlStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
                 } else {
-                    let fKHz = freqHz / 1000.0;
+                    let fKHz = xlFreq / 1000.0;
                     let rac = Rdc2 * (1.0 + 0.15 * Math.sqrt(fKHz));
-                    let Q = XL / rac;
+                    let Q = XLs / rac;
                     let qStr = (Q >= 100) ? Q.toFixed(0) : Q.toFixed(1);
                     secondary = `R_dc: ${Rdc2.toFixed(2)} Ω  |  X_L = ${xlStr}  |  Q = ${qStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
                 }

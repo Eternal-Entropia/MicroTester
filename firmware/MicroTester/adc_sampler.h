@@ -36,7 +36,10 @@ bool adc_osc_process_frame(uint8_t** outPtr, uint16_t* outLen);
 int adc_sampler_get_available(uint8_t** outPtr);
 void adc_sampler_consume(int count);
 
-// Burst hardware DMA sampling for Component Tester RL/RC analysis
-void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t count, uint32_t rateKHz);
+// Burst hardware DMA sampling for Component Tester RL/RC analysis.
+// phaseShift delays the start of the sampling grid by that many timer ticks;
+// pass a different value per burst to decorrelate the sine-vs-grid phase so
+// repeated averaging actually cancels fractional-period artifacts.
+void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t count, uint32_t rateKHz, uint32_t phaseShift);
 
 #endif // ADC_SAMPLER_H

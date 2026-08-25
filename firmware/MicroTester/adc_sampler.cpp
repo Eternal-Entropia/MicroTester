@@ -75,6 +75,8 @@ static uint8_t getAdcChannel(int pin) {
         case PA5: return 5;
         case PA6: return 6;
         case PA7: return 7;
+        case PB0: return 8;
+        case PB1: return 9;
         default: return 4;
     }
 }
@@ -243,7 +245,7 @@ void adc_sampler_start(AdcConfig config) {
         uint32_t periodNs = 1000000UL / currentConfig.rateKHz;
         if (periodNs < 1) periodNs = 1;
 
-        etsCyclesPerStep = (uint32_t)(((double)periodNs * (double)cpuFreq) / 1000000000.0);
+        etsCyclesPerStep = (uint32_t)(((float)periodNs * (float)cpuFreq) / 1000000000.0f);
         if (etsCyclesPerStep == 0) etsCyclesPerStep = 1;
     } else if (isMultiCh) {
         // Apparatus-sync multi-channel scan mode
@@ -318,7 +320,7 @@ uint8_t adc_sampler_get_session_id() {
     return currentConfig.sessionId;
 }
 
-void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t count, uint32_t rateKHz) {
+void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t count, uint32_t rateKHz, uint32_t phaseShift) {
     #if defined(ARDUINO_ARCH_STM32)
     adc_sampler_stop();
     
@@ -336,6 +338,13 @@ void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t coun
     uint32_t timerClk = 84000000;
     uint32_t arr = (timerClk / (rateKHz * 1000)) - 1;
     TIM2->ARR = arr;
+    // Start the sampling grid at a per-burst phase: the first sample is taken on
+    // the first TIM2 update (wrap), i.e. (arr + 1 - CNT) ticks after CEN. With a
+    // different CNT preload per burst the sine/sample-grid phase decorrelates and
+    // the averaging of repeated captures cancels fractional-period artifacts
+    // instead of repeating the same alignment error (all bursts at CNT=0).
+    TIM2->EGR = TIM_EGR_UG;   // reload ARR first (UG reinitializes CNT to 0)
+    TIM2->CNT = phaseShift % (arr + 1); // phase offset survives until CEN
     TIM2->CR2 = (2 << 4); // TRGO on Update
     
     DMA2_Stream0->CR &= ~DMA_SxCR_EN;
@@ -353,18 +362,27 @@ void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t coun
     ADC1->SQR3 = channel;
     ADC1->SMPR2 &= ~(7 << (3 * channel));
     
-    if (rateKHz >= 2000)      ADC1->SMPR2 |= (0 << (3 * channel)); // 3 cycles (0.357 us)
-    else if (rateKHz >= 1000) ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles (0.64 us)
+    // Sampling time must fit the TIM2 trigger period, else the ADC overruns and
+    // the DMA fills garbage (sporadic dropouts to ~0). Conversion takes SMP+12
+    // cycles at 42 MHz: 3 -> 357 ns (2800 kHz max), 15 -> 643 ns (1556 kHz max),
+    // 84 -> 2.29 us (437 kHz max). Pick the shortest that still keeps up.
+    if (rateKHz > 1550)  ADC1->SMPR2 |= (0 << (3 * channel)); // 3 cycles
+    else if (rateKHz >= 400) ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
     else                      ADC1->SMPR2 |= (4 << (3 * channel)); // 84 cycles
     
     ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON;
     
     DMA2_Stream0->CR |= DMA_SxCR_EN;
     TIM2->CR1 |= TIM_CR1_CEN;
-    
-    uint32_t timeout = 50000;
-    while (!(DMA2->LISR & DMA_LISR_TCIF0) && --timeout);
-    
+
+    // Wait for the full capture. The window can outlast a fixed loop count by far:
+    // at low sample rates (e.g. 100 Hz -> 1.6 kHz, 64 samples) the DMA takes ~40 ms,
+    // so a 50000-iteration spin (~3-5 ms) bailed out early and leave most of the
+    // output buffer stale, corrupting the measurement. Time the wait by window length.
+    uint32_t windowUs = ((uint32_t)count * 1000000UL) / (rateKHz * 1000UL);
+    uint32_t deadline = micros() + windowUs + 5000UL; // +5 ms hang guard
+    while (!(DMA2->LISR & DMA_LISR_TCIF0) && (int32_t)(micros() - deadline) < 0);
+
     TIM2->CR1 &= ~TIM_CR1_CEN;
     DMA2_Stream0->CR &= ~DMA_SxCR_EN;
     while (DMA2_Stream0->CR & DMA_SxCR_EN);
@@ -378,9 +396,6 @@ uint8_t adc_sampler_get_channel_mask() {
     for (uint8_t i = 0; i < multiChCount; i++) m |= (1 << multiChList[i]);
     return m;
 }
-
-#if defined(ARDUINO_ARCH_STM32)
-#endif
 
 void adc_sampler_set_bias(bool enable) {
     currentConfig.enableBias = enable;

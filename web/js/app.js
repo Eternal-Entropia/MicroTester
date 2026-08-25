@@ -1,4 +1,17 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Disclaimer modal (first launch)
+    const modalDisclaimer = document.getElementById('modalDisclaimer');
+    const btnDisclaimerAgree = document.getElementById('btnDisclaimerAgree');
+    if (modalDisclaimer && btnDisclaimerAgree) {
+        if (!localStorage.getItem('mt_disclaimer_accepted')) {
+            modalDisclaimer.classList.add('active');
+        }
+        btnDisclaimerAgree.addEventListener('click', () => {
+            localStorage.setItem('mt_disclaimer_accepted', '1');
+            modalDisclaimer.classList.remove('active');
+        });
+    }
+
     // 0. Sidebar Collapse Toggle
     const btnToggleSidebar = document.getElementById('btnToggleSidebar');
     const sidebar = document.getElementById('sidebar');
@@ -54,6 +67,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (window.updateLogicPreview) {
                 setTimeout(() => window.updateLogicPreview(), 20);
+            }
+            if (window.renderFrCanvas) {
+                setTimeout(() => window.renderFrCanvas(), 20);
             }
         });
     });

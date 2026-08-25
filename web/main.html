@@ -149,8 +149,128 @@
             box-shadow: 0 0 12px rgba(234, 179, 8, 0.3), inset 0 0 8px rgba(234, 179, 8, 0.2);
         }
 
-        .ch-toggle.ch-yellow:hover input:checked~span {
+                        .ch-toggle.ch-yellow:hover input:checked~span {
             background-color: rgba(234, 179, 8, 0.25);
+        }
+
+        /* Fc Marker: Pink */
+        .ch-toggle.ch-pink input:checked~span {
+            background-color: rgba(244, 114, 182, 0.15);
+            border-color: #f472b6;
+            color: #f9a8d4;
+            box-shadow: 0 0 12px rgba(244, 114, 182, 0.3), inset 0 0 8px rgba(244, 114, 182, 0.2);
+        }
+
+        .ch-toggle.ch-pink:hover input:checked~span {
+            background-color: rgba(244, 114, 182, 0.25);
+        }
+
+        /* Settings switches */
+        .st-toggle {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .st-toggle input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+        }
+
+        .st-track {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 80px;
+            height: 30px;
+            padding: 3px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background-color: #334155;
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        .st-label {
+            flex: 1;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            line-height: 22px;
+            color: #fff;
+            text-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+            transition: opacity 0.25s;
+        }
+
+        .st-on {
+            opacity: 0;
+        }
+
+        .st-off {
+            opacity: 1;
+        }
+
+        .st-toggle input:checked~.st-track .st-on {
+            opacity: 1;
+        }
+
+        .st-toggle input:checked~.st-track .st-off {
+            opacity: 0;
+        }
+
+        .st-thumb {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #f1f5f9;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1;
+        }
+
+        .st-toggle:hover .st-track {
+            filter: brightness(1.15);
+        }
+
+        .st-toggle input:focus-visible~.st-track {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+
+        .st-toggle input:checked~.st-track .st-thumb {
+            transform: translateX(50px);
+        }
+
+        /* OFF state fill (unchecked) - gray */
+        .st-toggle input:not(:checked)~.st-track {
+            border-color: #64748b;
+            background-color: #475569;
+        }
+
+        .st-toggle input:not(:checked)~.st-track .st-label {
+            color: #cbd5e1;
+            text-shadow: none;
+        }
+
+        .st-toggle input:not(:checked)~.st-track .st-thumb {
+            background: #94a3b8;
+        }
+
+        /* ON state fill (checked) - bright blue */
+        .st-toggle input:checked~.st-track {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.55);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.35), inset 0 0 8px rgba(59, 130, 246, 0.3);
         }
     </style>
 </head>
@@ -162,9 +282,9 @@
         <!-- ===================== Sidebar ===================== -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-logo">
+                <a href="start.html" class="sidebar-logo" title="Back to Start">
                     MicroTester
-                </div>
+                </a>
                 <button class="sidebar-toggle-btn" id="btnToggleSidebar" title="Toggle Sidebar">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round">
@@ -266,9 +386,24 @@
                 </button>
             </nav>
 
+            <div class="sidebar-bottom">
+                <button class="nav-item" data-panel="settings" title="Settings">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </span>
+                    <span>Settings</span>
+                </button>
+            </div>
+
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Beta v5
+                    MicroTester Release v1
                 </div>
             </div>
         </aside>
@@ -305,7 +440,7 @@
                             </button>
                         </div>
                         <button class="btn btn-outline btn-sm" id="btnSettings">
-                            ⚙ Settings
+                            Settings
                         </button>
                     </div>
 
@@ -353,7 +488,7 @@
                         style="margin-top: 12px; padding: 14px 18px; display: none;">
                         <div
                             style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-cyan, #38bdf8); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
-                            <span>⚡ AC Signal Measurements</span>
+                            <span>AC Signal Measurements</span>
                         </div>
                         <div class="volt-info-row" style="margin-top: 0;">
                             <div class="volt-info-item">
@@ -408,7 +543,7 @@
 
                     <!-- Settings Panel (hidden by default) -->
                     <div class="config-panel collapsed" id="voltConfig">
-                        <div class="config-title">⚙ Voltmeter Settings</div>
+                        <div class="config-title">Voltmeter Settings</div>
 
                         <div class="config-grid">
                             <div class="config-field">
@@ -500,13 +635,13 @@
                         </div>
 
                         <button class="btn btn-outline btn-sm" id="btnOscSettings">
-                            ⚙ Settings
+                            Settings
                         </button>
                     </div>
 
                     <!-- Settings Panel (hidden by default) -->
                     <div class="config-panel collapsed" id="oscConfigPanel">
-                        <div class="config-title">⚙ Oscilloscope Settings</div>
+                        <div class="config-title">Oscilloscope Settings</div>
                         <div class="config-grid"
                             style="grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px;">
                             <div class="config-field" style="min-width: 170px; flex-shrink: 0;">
@@ -537,10 +672,10 @@
                                     <option value="1">1 kHz</option>
                                     <option value="10">10 kHz</option>
                                     <option value="50">50 kHz</option>
-                                    <option value="100">100 kHz</option>
+                                    <option value="100" selected>100 kHz</option>
                                     <option value="250">250 kHz</option>
                                     <option value="500">500 kHz</option>
-                                    <option value="1000" selected>1 MHz (Realtime)</option>
+                                    <option value="1000">1 MHz (Realtime)</option>
                                     <option value="2000">2 MHz (Realtime)</option>
                                     <option value="2800">2.8 MHz (Max Realtime / 12-bit)</option>
                                     <option value="3818">3.8 MHz (Max Realtime / 8-bit)</option>
@@ -553,8 +688,8 @@
                             <div class="config-field">
                                 <label>ADC Resolution</label>
                                 <select id="cfgOscResolution">
-                                    <option value="8" selected>8-bit (20k pts, 255 steps)</option>
-                                    <option value="12">12-bit (10k pts, 4095 steps)</option>
+                                    <option value="8">8-bit (20k pts, 255 steps)</option>
+                                    <option value="12" selected>12-bit (10k pts, 4095 steps)</option>
                                 </select>
                             </div>
                             <div class="config-field">
@@ -569,7 +704,7 @@
                             <div class="config-field">
                                 <label>Voltage Range</label>
                                 <select id="cfgOscVoltRange">
-                                    <option value="±30" data-divider="11.0" data-baseoffset="0.0" data-bias="false"
+                                    <option value="±30" data-divider="21.0" data-baseoffset="0.0" data-bias="true"
                                         data-autopolarity="true" selected>±30V Auto-Polarity</option>
                                     <option value="0..3.3" data-divider="1.0" data-baseoffset="0.0" data-bias="false"
                                         data-autopolarity="false">0..3.3V Direct Input (1:1)</option>
@@ -609,7 +744,7 @@
                         style="flex: 1; padding: 0; overflow: hidden; position: relative; min-height: 400px;">
                         <div id="oscDesyncWarning"
                             style="display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(234, 179, 8, 0.9); color: #000; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 12px; z-index: 10;">
-                            ⚠ Channels are not time-synchronized
+                            Channels are not time-synchronized
                         </div>
                         <canvas id="oscCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
                     </div>
@@ -647,14 +782,14 @@
                         style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
                         <div style="display: flex; gap: 12px; align-items: center;">
                             <button class="btn btn-success btn-sm" id="btnCompTest" disabled>
-                                🔬 Test Component
+                                Test Component
                             </button>
                             <button class="btn btn-outline btn-sm" id="btnCompStop">
-                                ⏹ Cancel
+                                Cancel
                             </button>
                             <button class="btn btn-outline btn-sm" id="btnSmallCap" disabled
                                 title="Ultra-Small Capacitors (1-80pF)">
-                                ⚡ pF Mode
+                                pF Mode
                             </button>
                         </div>
                         <div id="compStatus" class="comp-status idle">
@@ -804,20 +939,149 @@
 
                 <!-- ======================== FREQ RESPONSE ======================== -->
                 <div class="tab-panel" id="panel-freqresp">
+                    <!-- Toolbar Card -->
                     <div class="card"
-                        style="min-height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; gap: 16px;">
-                        <div style="font-size: 56px; line-height: 1;">📈</div>
-                        <h2 style="font-size: 22px; font-weight: 700; color: var(--accent-cyan, #38bdf8); margin: 0;">
-                            Frequency Response
-                        </h2>
-                        <span class="status-badge"
-                            style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; letter-spacing: 0.05em;">
-                            🚀 Coming Soon
-                        </span>
-                        <p class="text-muted" style="max-width: 420px; font-size: 13px; line-height: 1.6; margin: 0;">
-                            Frequency Response sweep measurement (Bode Plot) and LC filter network analysis are
-                            currently under development.
-                        </p>
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-success btn-sm" id="btnFrSweep">
+                                ▶ Start Sweep
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="btnFrStop" disabled>
+                                ■ Stop
+                            </button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="text-xs text-muted" id="lblFrRange"></span>
+                        </div>
+                    </div>
+
+                    <!-- Bode Plot Card -->
+                    <div class="card" style="padding: 16px; position: relative;">
+                        <div class="config-title" style="margin-bottom: 8px;">Bode Plot (Magnitude)</div>
+                        <div style="width: 100%; border-radius: var(--radius-sm); overflow: hidden; background: #0f172a;">
+                            <canvas id="frCanvas" style="width: 100%; height: 300px; display: block;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Controls Card -->
+                    <div class="card">
+                        <div class="config-title">FR Configuration</div>
+                        <div class="config-grid"
+                            style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px;">
+                            <!-- Column 1: Mode, Direct limit, Points & Quick Sweep Presets -->
+                            <div style="display: flex; flex-direction: column; gap: 10px; flex: 1.2; min-width: 260px;">
+                                <div class="config-field">
+                                    <label>Measurement Mode</label>
+                                    <select id="cfgFrMode">
+                                        <option value="diode">Diode (Meander PA8, Diode Detector, 10 Hz – 42 MHz)</option>
+                                        <option value="direct">Direct (Meander PA8, Goertzel, 10 Hz – 1 MHz)</option>
+                                        <option value="sine" selected>Sine (Σ-Δ DAC PB5, Goertzel, 10 Hz – 1 MHz)</option>
+                                    </select>
+                                </div>
+                                <div class="config-field" id="fldFrOversample">
+                                    <label>Oversampling</label>
+                                    <select id="cfgFrOversample">
+                                        <option value="0">0 (Off / 1x — Fastest)</option>
+                                        <option value="2">2x (2 captures)</option>
+                                        <option value="4">4x (4 captures)</option>
+                                        <option value="8">8x (8 captures)</option>
+                                        <option value="16" selected>16x (16 captures — Default)</option>
+                                        <option value="32">32x (32 captures)</option>
+                                        <option value="64">64x (64 captures)</option>
+                                        <option value="128">128x (128 captures — Max Precision)</option>
+                                    </select>
+                                </div>
+                                <div class="config-field">
+                                    <label>Points</label>
+                                    <input type="number" id="cfgFrPoints" value="96" min="2" step="1"
+                                        style="width: 100%; font-size: 13px;" placeholder="96" />
+                                </div>
+                                <!-- Quick Sweep Presets -->
+                                <div
+                                    style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 2px;">
+                                    <span class="text-xs text-muted"
+                                        style="margin-right: 2px; font-weight: 600;">Sweep:</span>
+                                    <button class="btn btn-outline btn-sm fr-preset-btn" data-mode="sine"
+                                        data-fmin="10" data-fmax="1000000"
+                                        style="padding: 2px 6px; font-size: 11px;">Sine Full</button>
+                                    <button class="btn btn-outline btn-sm fr-preset-btn" data-mode="diode"
+                                        data-fmin="10" data-fmax="42000000"
+                                        style="padding: 2px 6px; font-size: 11px;">Full</button>
+                                    <button class="btn btn-outline btn-sm fr-preset-btn" data-mode="sine"
+                                        data-fmin="20" data-fmax="20000"
+                                        style="padding: 2px 6px; font-size: 11px;">Audio 20–20k</button>
+                                    <button class="btn btn-outline btn-sm fr-preset-btn" data-mode="sine"
+                                        data-fmin="100000" data-fmax="1000000"
+                                        style="padding: 2px 6px; font-size: 11px;">HF 100k–1M</button>
+                                </div>
+                            </div>
+
+                            <!-- Column 2: Large Sweep Start Knob -->
+                            <div class="config-field"
+                                style="display: flex; flex-direction: column; align-items: center;">
+                                <label>Sweep Start</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="knob-container" id="knobFrFmin"
+                                        style="width: 180px; height: 180px; margin-right: 0;">
+                                        <svg viewBox="0 0 100 100" class="knob-svg">
+                                            <!-- Radius 40. Circumference = 2 * PI * 40 = 251.33 -->
+                                            <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b"
+                                                stroke-width="12" />
+                                            <circle id="knobFrFminFill" cx="50" cy="50" r="40" fill="none"
+                                                stroke="#38bdf8" stroke-width="12" stroke-linecap="round"
+                                                stroke-dasharray="251.33" stroke-dashoffset="251.33"
+                                                transform="rotate(-90 50 50)"
+                                                style="filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));" />
+                                            <circle id="knobFrFminThumb" cx="50" cy="10" r="8" fill="#ffffff" />
+                                        </svg>
+                                        <div class="knob-value" id="knobFrFminText" style="font-size: 24px;">
+                                            20<br><span style="font-size:13px; color: #94a3b8">Hz</span></div>
+                                    </div>
+                                    <input type="text" id="cfgFrFmin" value="20" inputmode="numeric"
+                                        style="width: 95px; font-size: 13px;"
+                                        title="Scroll mouse wheel to change" />
+                                </div>
+                            </div>
+
+                            <!-- Column 3: Large Sweep Stop Knob -->
+                            <div class="config-field"
+                                style="display: flex; flex-direction: column; align-items: center;">
+                                <label>Sweep Stop</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="knob-container" id="knobFrFmax"
+                                        style="width: 180px; height: 180px; margin-right: 0;">
+                                        <svg viewBox="0 0 100 100" class="knob-svg">
+                                            <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b"
+                                                stroke-width="12" />
+                                            <circle id="knobFrFmaxFill" cx="50" cy="50" r="40" fill="none"
+                                                stroke="#38bdf8" stroke-width="12" stroke-linecap="round"
+                                                stroke-dasharray="251.33" stroke-dashoffset="251.33"
+                                                transform="rotate(-90 50 50)"
+                                                style="filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));" />
+                                            <circle id="knobFrFmaxThumb" cx="50" cy="10" r="8" fill="#ffffff" />
+                                        </svg>
+                                        <div class="knob-value" id="knobFrFmaxText" style="font-size: 24px;">
+                                            1.00<br><span style="font-size:13px; color: #94a3b8">MHz</span></div>
+                                    </div>
+                                    <input type="text" id="cfgFrFmax" value="1000000" inputmode="numeric"
+                                        style="width: 95px; font-size: 13px;"
+                                        title="Scroll mouse wheel to change" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Debug Log Card (toggled from Settings) -->
+                    <div class="card" id="frDebugLogCard" style="display: none; padding: 12px 16px;">
+                        <div class="config-title" style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                            <span>Debug Log</span>
+                            <button class="btn btn-outline btn-sm" id="btnFrLogDownload"
+                                style="padding: 2px 8px; font-size: 11px;">Copy log</button>
+                            <button class="btn btn-outline btn-sm" id="btnFrLogClear"
+                                style="padding: 2px 8px; font-size: 11px; color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">✕ Clear</button>
+                        </div>
+                        <pre id="frLogView"
+                            style="max-height: 160px; overflow: auto; margin: 0; padding: 8px; background: #0f172a; border: 1px solid #1e293b; border-radius: var(--radius-sm); font-size: 10px; line-height: 1.5; font-family: 'JetBrains Mono', monospace; color: #94a3b8; white-space: pre-wrap; word-break: break-all;">(log empty)</pre>
                     </div>
                 </div>
 
@@ -1054,11 +1318,12 @@
                                 <div class="config-field">
                                     <label>Signal Gen. Mode & Waveform</label>
                                     <select id="cfgPwmDacWaveform">
-                                        <option value="sd_sine" selected>Σ-Δ 2nd-Order Sine @ 42 MHz</option>
-                                        <option value="sd_saw">Σ-Δ 2nd-Order Sawtooth @ 42 MHz</option>
-                                        <option value="sd_tri">Σ-Δ 2nd-Order Triangle @ 42 MHz</option>
-                                        <option value="sd_square">Σ-Δ 2nd-Order Square @ 42 MHz</option>
-                                        <option value="sd_dc">Σ-Δ 2nd-Order DC Constant Voltage @ 42 MHz</option>
+                                        <option value="sd_sine" selected>Sine</option>
+                                        <option value="sd_saw">Sawtooth</option>
+                                        <option value="sd_tri">Triangle</option>
+                                        <option value="sd_square">Square</option>
+                                        <option value="sd_dc">DC Constant Voltage</option>
+                                        <option value="sd_noise">White Noise (Uniform, ≥100 kHz)</option>
                                     </select>
                                 </div>
                                 <!-- Presets -->
@@ -1171,20 +1436,14 @@
                             <div class="volt-info-value text-mono" id="lblPwmDacStepPrecision">±0.0012%</div>
                         </div>
                     </div>
-                </div>
-
-            </div>
+                </div><!-- /panel-pwmdac -->
 
             <!-- ======================== CALIBRATION ======================== -->
             <div class="tab-panel" id="panel-calibration">
                 <div class="card" style="max-width: 850px; margin: 0 auto;">
                     <div class="config-title" style="display: flex; align-items: center; gap: 8px; font-size: 16px;">
-                        <span>🎯 Probe & Offset Calibration</span>
+                        <span>Calibration</span>
                     </div>
-                    <p class="text-sm text-muted" style="margin-bottom: 24px;">
-                        Short your measurement probes to GND to calibrate zero voltage offsets for Voltmeter and
-                        Oscilloscope channels.
-                    </p>
 
                     <div style="display: grid; grid-template-columns: 1fr; gap: 16px;">
 
@@ -1193,7 +1452,7 @@
                             style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
                             <h4
                                 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                                <span>⚡ Channel Probe Calibration</span>
+                                <span>Channel Probe Calibration</span>
                             </h4>
                             <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
                                 Offsets and resistor divider corrections are applied globally to both the Voltmeter
@@ -1224,12 +1483,12 @@
                             </div>
                         </div>
 
-                        <!-- 2. Component Tester Calibration -->
+                        <!-- 3. Component Tester Calibration -->
                         <div
                             style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
                             <h4
                                 style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                                <span>🔬 Component Tester Calibration</span>
+                                <span>Component Tester Calibration</span>
                             </h4>
                             <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
                                 Short all three measurement probes (TP1, TP2, TP3) together and click Calibrate.
@@ -1238,7 +1497,7 @@
                             </p>
                             <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                                 <button class="btn btn-primary btn-sm" id="btnCompCalibTab">
-                                    🎯 Calibrate Probes (Short)
+                                    Calibrate Probes (Short)
                                 </button>
                                 <span id="compCalibBadge" class="status-badge"
                                     style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 12px; border-radius: 6px; display: none; flex-direction: column; gap: 4px; position: relative; padding-right: 24px;">
@@ -1255,19 +1514,83 @@
                             </div>
                         </div>
 
-                        <!-- 3. Advanced & Manual Calibration Submenu (Collapsible) -->
+                        <!-- 3. Frequency Response Calibration -->
+                        <div
+                            style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 12px; padding: 20px;">
+                            <h4
+                                style="margin: 0 0 8px 0; color: #38bdf8; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                <span>Frequency Response Calibration</span>
+                            </h4>
+                            <p class="text-sm text-muted" id="frCalibLive" style="margin-bottom: 16px; font-size: 12px;">
+                                Universal FR self-calibration: measures the reference curve across the entire frequency range (10 Hz – 1 MHz for Sine/Direct, 10 Hz – 42 MHz for Diode). Once calibrated, it automatically applies to all sweep ranges and presets.
+                            </p>
+                            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                                <button class="btn btn-primary btn-sm" id="btnFrCalibDiode"
+                                    style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.5);">
+                                    Calibrate Diode (PA8, 10 Hz – 42 MHz)
+                                </button>
+                                <button class="btn btn-primary btn-sm" id="btnFrCalibDirect"
+                                    style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.5);">
+                                    Calibrate Direct (PA8, 10 Hz – 1 MHz)
+                                </button>
+                                <button class="btn btn-primary btn-sm" id="btnFrCalibSine"
+                                    style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5);">
+                                    Calibrate Sine (PB5, 10 Hz – 1 MHz)
+                                </button>
+                                <span id="frCalibStatus" class="status-badge"
+                                    style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 12px; border-radius: 6px;">
+                                    Diode Zero: <span id="frCalibZeroVal">0</span> | Ref: <span
+                                        id="frCalibRefVal">—</span>
+                                    <span id="btnFrCalibReset"
+                                        style="color: #ef4444; margin-left: 8px; cursor: pointer; font-weight: bold;"
+                                        title="Reset FR Calibration">×</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- 4. Advanced & Manual Calibration Submenu (Collapsible) -->
                         <details
                             style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px 20px;">
                             <summary
                                 style="font-size: 13px; color: #94a3b8; cursor: pointer; font-weight: 600; user-select: none; display: inline-flex; align-items: center; gap: 8px;">
-                                <span>⚙ Advanced & Manual Calibration Options</span>
+                                <span>Manual Calibration Options</span>
                             </summary>
                             <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 16px;">
+
+                                <!-- Oscilloscope Zero Calibration (Manual) -->
+                                <div
+                                    style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 8px; padding: 14px;">
+                                    <h5 style="margin: 0 0 6px 0; color: #38bdf8; font-size: 13px;">Oscilloscope Zero
+                                        Calibration</h5>
+                                    <p class="text-sm text-muted" style="margin-bottom: 12px; font-size: 11px;">
+                                        Measures the zero offset with the probe disconnected (floating) in every oscilloscope
+                                        mode for the <strong>current bias state</strong> — 12-bit and 8-bit, real-time and ETS
+                                        sample rates. Stored corrections are applied per mode and channel.
+                                        <strong>Applies to the ±30V range only.</strong>
+                                    </p>
+                                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                                        <select class="form-control" id="oscRateZeroCh" style="width: 140px; font-size: 12px;">
+                                            <option value="0">CH1 (PA1)</option>
+                                            <option value="1">CH2 (PA2)</option>
+                                            <option value="2">CH3 (PA3)</option>
+                                            <option value="3">CH4 (PA4)</option>
+                                        </select>
+                                        <button class="btn btn-primary btn-sm" id="btnOscRateZeroCalib"
+                                            style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.5);">
+                                            Calibrate All Rates
+                                        </button>
+                                        <button class="btn btn-outline btn-sm" id="btnOscRateZeroReset">
+                                            Reset
+                                        </button>
+                                        <span id="oscRateZeroStatus" class="text-xs text-muted"></span>
+                                    </div>
+                                    <div id="oscRateZeroInfo" class="text-xs text-muted" style="margin-top: 10px;"></div>
+                                </div>
 
                                 <!-- Internal VREF (1.21V) Calibration -->
                                 <div
                                     style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.15); border-radius: 8px; padding: 14px;">
-                                    <h5 style="margin: 0 0 6px 0; color: #a855f7; font-size: 13px;">🔋 Internal VREF
+                                    <h5 style="margin: 0 0 6px 0; color: #a855f7; font-size: 13px;">Internal VREF
                                         (1.21V) Calibration</h5>
                                     <p class="text-sm text-muted" style="margin-bottom: 12px; font-size: 11px;">
                                         The STM32 has an internal 1.21V reference. Measuring it calculates the exact
@@ -1276,7 +1599,7 @@
                                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                                         <button class="btn btn-primary btn-sm" id="btnReqVrefTab"
                                             style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.5);">
-                                            🔄 Measure VREF
+                                            Measure VREF
                                         </button>
                                         <span id="vddaBadgeTab" class="status-badge"
                                             style="font-size: 11px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); padding: 4px 8px; border-radius: 6px;">
@@ -1291,7 +1614,7 @@
                                 <!-- Manual Single-Step Calibration -->
                                 <div
                                     style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 8px; padding: 14px;">
-                                    <h5 style="margin: 0 0 6px 0; color: #38bdf8; font-size: 13px;">🎯 Manual
+                                    <h5 style="margin: 0 0 6px 0; color: #38bdf8; font-size: 13px;">Manual
                                         Single-Step Calibration</h5>
                                     <p class="text-sm text-muted" style="margin-bottom: 12px; font-size: 11px;">
                                         Manual single-step calibration for zero offset (bias OFF) or DC bias offset
@@ -1299,11 +1622,11 @@
                                     </p>
                                     <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                                         <button class="btn btn-outline btn-sm" id="btnCalibZero">
-                                            🎯 Calibrate Zero (Bias OFF)
+                                            Calibrate Zero (Bias OFF)
                                         </button>
                                         <button class="btn btn-outline btn-sm" id="btnCalibBias"
                                             style="color: #facc15; border-color: rgba(234, 179, 8, 0.4);">
-                                            🎯 Calibrate DC Bias (Bias ON)
+                                            Calibrate DC Bias (Bias ON)
                                         </button>
                                     </div>
                                 </div>
@@ -1315,6 +1638,82 @@
                 </div>
             </div>
 
+            <!-- ======================== SETTINGS ======================== -->
+            <div class="tab-panel" id="panel-settings">
+                <div class="card" style="max-width: 560px; margin: 0 auto; padding: 40px 32px; text-align: center;">
+                    <img src="img/logo.svg" alt="MicroTester Logo"
+                        style="width: 220px; height: auto; margin-bottom: 24px; display: block; margin-left: auto; margin-right: auto;"
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <div style="display: none; font-size: 32px; font-weight: 700;
+                        background: linear-gradient(90deg, #38bdf8, #60a5fa, #3b82f6);
+                        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                        background-clip: text; margin-bottom: 24px;">
+                        MicroTester
+                    </div>
+
+                    <div style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+                        MicroTester Release v1
+                    </div>
+
+                    <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">
+                        MicroTester by Eternal-Entropia
+                    </div>
+
+                    <div
+                        style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
+                        <div class="config-field" style="text-align: left;">
+                            <label>Show Fc Marker (Bode Plot)</label>
+                            <label class="st-toggle">
+                                <input type="checkbox" id="cfgFrShowFc">
+                                <span class="st-track">
+                                    <span class="st-label st-on">ON</span>
+                                    <span class="st-label st-off">OFF</span>
+                                    <span class="st-thumb"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="config-field" style="text-align: left;">
+                            <label>Show Debug Log (Frequency Response)</label>
+                            <label class="st-toggle">
+                                <input type="checkbox" id="cfgShowDebugLog">
+                                <span class="st-track">
+                                    <span class="st-label st-on">ON</span>
+                                    <span class="st-label st-off">OFF</span>
+                                    <span class="st-thumb"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="config-field" style="text-align: left;">
+                            <label>Show 3.3V HIGH / 0V LOW Labels (PWM &amp; Signal Generator)</label>
+                            <label class="st-toggle">
+                                <input type="checkbox" id="cfgShowLevelLabels" checked>
+                                <span class="st-track">
+                                    <span class="st-label st-on">ON</span>
+                                    <span class="st-label st-off">OFF</span>
+                                    <span class="st-thumb"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="config-field" style="text-align: left;">
+                            <label>Component Tester Oversampling</label>
+                            <select id="cfgCompOversample" style="width: 140px; font-size: 13px;"
+                                title="ADC averaging for Component Tester (higher = more accurate, slower)">
+                                <option value="128" selected>128x (default)</option>
+                                <option value="256">256x</option>
+                                <option value="512">512x</option>
+                                <option value="1024">1024x (max accuracy)</option>
+                            </select>
+                        </div>
+                        <div class="config-field" style="text-align: left;">
+                            <label>Xc Calculation Frequency (Hz)</label>
+                            <input type="number" id="cfgCompFreq" min="1" max="1000000" step="1" value="120"
+                                style="width: 140px; font-size: 13px;"
+                                title="Frequency in Hz used on the PC to calculate capacitive reactance Xc = 1/(2*pi*f*C) and inductive reactance XL = 2*pi*f*L">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Calibration Wizard Modal -->
             <div class="modal-overlay" id="modalUnifiedCalib">
                 <div class="modal"
@@ -1322,7 +1721,7 @@
                     <div class="modal-header" style="border-bottom: 1px solid #1e293b;">
                         <h3 style="margin: 0; color: #38bdf8; font-size: 16px; display: flex; align-items: center; gap: 8px;"
                             id="calibModalTitle">
-                            Channel Calibration Wizard
+                            Channel &amp; Oscilloscope Calibration Wizard
                         </h3>
                         <button class="modal-close" id="btnCalibModalClose" style="color: #94a3b8;">&times;</button>
                     </div>
@@ -1354,14 +1753,133 @@
                 </div>
             </div>
 
-            <script src="js/app.js"></script>
+            <!-- FR Auto-Calibration Wizard Modal -->
+            <div class="modal-overlay" id="modalFrCalib">
+                <div class="modal"
+                    style="width: 520px; background: #0f172a; border: 1px solid #1e293b; color: #f8fafc;">
+                    <div class="modal-header" style="border-bottom: 1px solid #1e293b;">
+                        <h3 style="margin: 0; color: #38bdf8; font-size: 16px; display: flex; align-items: center; gap: 8px;"
+                            id="frModalTitle">
+                            FR Auto-Calibration
+                        </h3>
+                        <button class="modal-close" id="btnFrModalClose" style="color: #94a3b8;">&times;</button>
+                    </div>
+                    <div class="modal-body" style="padding: 12px 0;">
+                        <div id="frModalStepDesc"
+                            style="font-size: 13px; color: #cbd5e1; line-height: 1.6; margin-bottom: 16px;">
+                        </div>
+                        <div id="frModalPointsRow"
+                            style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                            <span style="font-size: 12px; color: #94a3b8;">Calibration points:</span>
+                            <select class="form-control" id="frCalibPointsDiode" title="Calibration points"
+                                style="width: 100px; font-size: 12px;" data-mode="diode">
+                                <option value="128">128 pts</option>
+                                <option value="256">256 pts</option>
+                                <option value="512">512 pts</option>
+                                <option value="1024" selected>1024 pts</option>
+                            </select>
+                            <select class="form-control" id="frCalibPointsDirect" title="Calibration points"
+                                style="width: 100px; font-size: 12px;" data-mode="direct">
+                                <option value="128">128 pts</option>
+                                <option value="256">256 pts</option>
+                                <option value="512">512 pts</option>
+                                <option value="1024" selected>1024 pts</option>
+                            </select>
+                            <select class="form-control" id="frCalibPointsSine" title="Calibration points"
+                                style="width: 100px; font-size: 12px;" data-mode="sine">
+                                <option value="128">128 pts</option>
+                                <option value="256">256 pts</option>
+                                <option value="512">512 pts</option>
+                                <option value="1024" selected>1024 pts</option>
+                            </select>
+                            <span style="font-size: 12px; color: #94a3b8; margin-left: 8px;">Oversampling:</span>
+                            <select class="form-control" id="frCalibOversample" title="Oversampling"
+                                style="width: 130px; font-size: 12px;">
+                                <option value="0">0 (Off / 1x)</option>
+                                <option value="2">2x</option>
+                                <option value="4">4x</option>
+                                <option value="8">8x</option>
+                                <option value="16" selected>16x (Default)</option>
+                                <option value="32">32x</option>
+                                <option value="64">64x</option>
+                                <option value="128">128x (Max)</option>
+                            </select>
+                        </div>
+                        <div id="frModalProgressContainer" style="display: none; margin-bottom: 16px;">
+                            <div style="font-size: 12px; color: #38bdf8; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace;"
+                                id="frModalStatusText">Measuring reference sweep...</div>
+                            <div
+                                style="background: rgba(255,255,255,0.1); border-radius: 4px; height: 8px; overflow: hidden;">
+                                <div id="frModalProgressBar"
+                                    style="width: 0%; height: 100%; background: #38bdf8; transition: width 0.1s linear;">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="frModalResults"
+                            style="display: none; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; margin-bottom: 16px;">
+                        </div>
+                    </div>
+                    <div class="modal-footer"
+                        style="display: flex; justify-content: flex-end; gap: 12px; padding-top: 12px; border-top: 1px solid #1e293b;">
+                        <button class="btn btn-outline btn-sm" id="btnFrModalCancel">Cancel</button>
+                        <button class="btn btn-success btn-sm" id="btnFrModalNext">Continue ▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Disclaimer Modal -->
+            <div class="modal-overlay" id="modalDisclaimer">
+                <div class="modal"
+                    style="width: 520px; background: #0f172a; border: 1px solid #1e293b; color: #f8fafc;">
+                    <div class="modal-header" style="border-bottom: 1px solid #1e293b;">
+                        <h3 style="margin: 0; color: #f59e0b; font-size: 16px;">⚠️ Warning — Safety Notice &amp;
+                            Disclaimer</h3>
+                    </div>
+                    <div class="modal-body" style="padding: 12px 0;">
+                        <div
+                            style="font-size: 13px; color: #cbd5e1; line-height: 1.7;">
+                            <p style="margin: 0 0 12px 0;"><strong style="color: #ef4444;">Please do not connect this device to mains power (110/220 V AC). It is strictly prohibited.</strong> This device is
+                                not designed to measure mains voltage and does not provide any protective
+                                characteristics for such use.</p>
+                            <p style="margin: 0 0 12px 0;">The copyright holder of this software assumes no liability
+                                for any direct or consequential damage resulting from the use of this device or
+                                software, including but not limited to: failure of the microcontroller (MicroTester),
+                                a personal computer, a smartphone, or any other equipment connected to the
+                                device.</p>
+                            <p style="margin: 0;">This software is provided "as is", without any warranty of proper
+                                operation, measurement accuracy, or fitness for a particular purpose. By using this
+                                device and software, you accept all associated risks at your own responsibility.</p>
+                        </div>
+                        <p style="margin: 0 0 14px 0; font-size: 12px; color: #94a3b8; text-align: center;">
+                            By clicking the button below, you confirm that you have read, understood, and accept this
+                            policy in full. The author assumes no liability for any consequences arising from the use
+                            of this device and software.
+                        </p>
+                    </div>
+                    <div class="modal-footer"
+                        style="display: flex; justify-content: center; padding-top: 12px; border-top: 1px solid #1e293b;">
+                        <button class="btn btn-success btn-sm" id="btnDisclaimerAgree"
+                            style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.5); padding: 8px 20px;">
+                            I agree to this policy
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            </div><!-- /content-area -->
+        </div><!-- /main-content -->
+    </div><!-- /main-container -->
+
+    <script src="js/app.js?v=2"></script>
             <script src="js/usb_protocol.js"></script>
             <script src="js/calibration.js"></script>
             <script src="js/voltmeter.js?v=3"></script>
             <script src="js/oscilloscope.js?v=3"></script>
-            <script src="js/siggen.js"></script>
-            <script src="js/pwmdac.js"></script>
+            <script src="js/pwm_generator.js"></script>
+            <script src="js/signal_generator.js?v=2"></script>
             <script src="js/comp_tester.js?v=14"></script>
+            <script src="js/logger.js?v=2"></script>
+            <script src="js/freqresp.js?v=58"></script>
 
             <script>
                 if ('serviceWorker' in navigator) {

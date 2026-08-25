@@ -19,13 +19,16 @@
         multiFrames: [null, null, null, null],
         syncPending: false,
         oversample: 0,
-        sampleRateKHz: 913,   // default estimate, updated by actual throughput
+        sampleRateKHz: 100,   // default (100 kHz), synced from UI select at init
         vRef: 3.3,
-        adcRes: 255,          // 8-bit resolution
+        adcRes: 4095,         // 12-bit resolution
         divider: 1.0,
         biasEnabled: true,
+        autoPolarity: false,   // ±30V Auto-Polarity mode: switch bias automatically
+        autoBiasVotes: 0,      // consecutive frames voting for a bias switch
+        autoBiasLastSwitch: 0, // cooldown timestamp (ms)
 
-        resolution: 8,
+        resolution: 12,
 
         // Display
         timePerDiv: 0.002,    // seconds per division (2ms default)
@@ -92,16 +95,238 @@
             if (oscState.biasEnabled) {
                 let maxRate = oscState.resolution === 12 ? 2800 : 3818;
                 let actualRateKHz = Math.min(oscState.sampleRateKHz, maxRate);
-                freqComp = (actualRateKHz - 1000) * 0.0022;
+                // Roll-off compensation applies only ABOVE 1 MHz. Below that it must be 0,
+                // otherwise it injects a large negative DC shift (e.g. -1.98 V @ 100 kHz).
+                freqComp = Math.max(0, actualRateKHz - 1000) * 0.0022;
             }
 
             if (window.Calibration) {
-                return window.Calibration.calculateVolts(oscState.biasEnabled, ch, raw, oscState.resolution, oscState.divider, freqComp);
+                return window.Calibration.calculateVolts(oscState.biasEnabled, ch, raw, oscState.resolution, oscState.divider, freqComp)
+                    + getRateZeroCorr(ch);
             }
             return 0;
         } else {
             // Logic mode or unsupported
             return raw > 127 ? 3.3 : 0.0;
+        }
+    }
+
+    // ======================== Per-Rate Zero Calibration ========================
+    // Stores, for every oscilloscope mode (resolution x sample rate) and channel,
+    // the zero CORRECTION in probe/display volts: how much the voltage reading
+    // must be raised (positive) or lowered (negative) so a shorted probe sits at 0 V.
+    // The correction is measured end-to-end on displayed values, so it automatically
+    // includes bias offset, divider error and freqComp roll-off compensation.
+
+    // Storage layout: { [resolution]: { [rateKey]: [ch0, ch1, ch2, ch3] } }
+    // rateKey = "<rate>" for bias OFF, "<rate>b" for bias ON — zero differs per bias.
+    // v4: entries are probe-referred corrections (V), not pin-referred zeros.
+    // v5: separate entries per bias state (auto-polarity switches bias dynamically).
+    const RATE_ZERO_KEY = 'microtester_osc_rate_zero_v5';
+    const RATE_ZERO_MODES = {
+        12: [1, 10, 50, 100, 250, 500, 1000, 2000, 2800],
+        8: [1, 10, 50, 100, 250, 500, 1000, 2000, 2800, 3818, 5000, 10000, 20000]
+    };
+
+    const rateZeroRateKey = (rate, biasEnabled) => String(rate) + (biasEnabled ? 'b' : '');
+
+    // In-memory cache — avoids JSON.parse on every sample.
+    let rateZeroCache = (() => {
+        try { return JSON.parse(localStorage.getItem(RATE_ZERO_KEY)) || {}; }
+        catch (e) { return {}; }
+    })();
+    if (Array.isArray(rateZeroCache)) rateZeroCache = {}; // guard against legacy array format
+
+    function loadRateZeroMap() {
+        return rateZeroCache;
+    }
+
+    function saveRateZeroMap(map) {
+        rateZeroCache = map;
+        try { localStorage.setItem(RATE_ZERO_KEY, JSON.stringify(map)); } catch (e) { /* storage full */ }
+    }
+
+    // Correction (probe volts) for the current mode/channel/bias. 0 = uncalibrated.
+    function getRateZeroCorr(ch) {
+        if (!isOsc30VMode()) return 0;
+        if (oscRateCapture && oscRateCapture.active) return 0; // don't apply while measuring
+        const resMap = rateZeroCache[String(oscState.resolution)];
+        if (!resMap) return 0;
+        const entry = resMap[rateZeroRateKey(oscState.sampleRateKHz, oscState.biasEnabled)];
+        const v = entry ? entry[ch] : undefined;
+        return (typeof v === 'number' && !isNaN(v)) ? v : 0;
+    }
+
+    let oscRateCapture = null; // active raw-ADC capture: { active, ch, sum, count }
+
+    // Rate-zero calibration is valid only for the ±30V Auto-Polarity range
+    // (divider ~11). In direct 0..3.3V mode there is no divider offset to cancel.
+    function isOsc30VMode() {
+        const sel = document.getElementById('cfgOscVoltRange');
+        if (sel) return sel.value === '±30';
+        return oscState.divider > 1.0;
+    }
+
+    function getRateZeroModeCount(ch) {
+        const map = loadRateZeroMap();
+        let total = 0, calibrated = 0;
+        for (const resKey in RATE_ZERO_MODES) {
+            for (const rate of RATE_ZERO_MODES[resKey]) {
+                total++;
+                const entry = map[resKey] && map[resKey][rateZeroRateKey(rate, oscState.biasEnabled)];
+                const v = entry ? entry[ch] : undefined;
+                if (typeof v === 'number' && !isNaN(v)) calibrated++;
+            }
+        }
+        return { calibrated, total };
+    }
+
+    const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // Measures the zero offset (shorted probe) for every oscilloscope mode
+    // (resolution x sample rate) on the given channel and stores the correction
+    // in probe volts per mode: how much to raise/lower the displayed voltage.
+    // options.bias          — force a specific bias state during the run (restored after)
+    // options.skipBusyCheck — caller (calibration wizard) manages _calibrationBusy itself
+    async function runRateZeroCalibration(channel, progressCb, options) {
+        options = options || {};
+        if (typeof microTester === 'undefined' || !microTester.device) {
+            throw new Error("Device not connected");
+        }
+        if (!isOsc30VMode()) {
+            throw new Error("Set Voltage Range to ±30V first — rate-zero calibration applies only to the ±30V range");
+        }
+        if (window.Calibration && window.Calibration._calibrationBusy && !options.skipBusyCheck) {
+            throw new Error("Another calibration is in progress");
+        }
+        const report = (msg) => { if (progressCb) { try { progressCb(msg); } catch (e) { } } };
+
+        const wasRunning = oscState.running;
+        const orig = {
+            rate: oscState.sampleRateKHz,
+            channel: oscState.channel,
+            multiChannel: oscState.multiChannel,
+            activeChannels: [...oscState.activeChannels],
+            triggerMode: oscState.triggerMode,
+            oversample: oscState.oversample,
+            resolution: oscState.resolution,
+            adcRes: oscState.adcRes,
+            biasEnabled: oscState.biasEnabled,
+            divider: oscState.divider
+        };
+        const forcedBias = (typeof options.bias === 'boolean') ? options.bias : null;
+
+        if (window.Calibration) window.Calibration._calibrationBusy = true;
+
+        if (forcedBias !== null && forcedBias !== oscState.biasEnabled) {
+            oscState.biasEnabled = forcedBias;
+            oscState.divider = forcedBias ? 21.0 : 11.0;
+        }
+
+        const grabFrame = () => oscState.currentFrame;
+        // Measures the displayed zero midpoint (Vmax+Vmin)/2 averaged over several frames
+        const measureMidpoint = async (frames) => {
+            let lastSeq = oscState.frameSeq || 0;
+            let acc = 0, used = 0;
+            for (let f = 0; f < frames; f++) {
+                const t0 = performance.now();
+                while ((oscState.frameSeq || 0) === lastSeq && performance.now() - t0 < 600) {
+                    await sleepMs(10);
+                }
+                if ((oscState.frameSeq || 0) === lastSeq) break; // stream stalled
+                lastSeq = oscState.frameSeq;
+                const fr = grabFrame();
+                if (!fr || fr.length === 0) continue;
+                let mn = Infinity, mx = -Infinity;
+                for (let i = 0; i < fr.length; i++) {
+                    if (fr[i] < mn) mn = fr[i];
+                    if (fr[i] > mx) mx = fr[i];
+                }
+                acc += (mn + mx) / 2;
+                used++;
+            }
+            return used > 0 ? (acc / used) : null;
+        };
+
+        try {
+            if (wasRunning) stopOsc();
+            await sleepMs(150);
+
+            // Force single-channel auto-trigger streaming on the selected channel
+            oscState.multiChannel = false;
+            oscState.channel = channel;
+            oscState.activeChannels = [channel];
+            oscState.triggerMode = 'auto';
+
+            const map = loadRateZeroMap();
+            const errors = [];
+            let step = 0;
+            let totalSteps = 0;
+            for (const resKey in RATE_ZERO_MODES) totalSteps += RATE_ZERO_MODES[resKey].length;
+
+            for (const resKey in RATE_ZERO_MODES) {
+                const res = parseInt(resKey, 10);
+                oscState.resolution = res;
+                oscState.adcRes = (res === 12) ? 4095 : 255;
+                const resSel = document.getElementById('cfgOscResolution');
+                if (resSel) resSel.value = String(res);
+
+                if (!map[resKey]) map[resKey] = {};
+
+                for (const rate of RATE_ZERO_MODES[resKey]) {
+                    step++;
+                    const biasLabel = oscState.biasEnabled ? "BIAS " : "NO-BIAS ";
+                    const modeLabel = `${res}-bit ${rate >= 5000 ? "(ETS) " : ""}@ ${rate} kHz (${biasLabel})`;
+                    report(`Calibrating zero ${modeLabel} (${step}/${totalSteps})...`);
+
+                    oscState.sampleRateKHz = rate;
+                    startOsc();              // running=true, sessionId++, streams frames
+                    await sleepMs(350);      // settle
+
+                    const mid = await measureMidpoint(12);
+
+                    stopOsc();
+                    await sleepMs(80);
+
+                    if (mid === null) {
+                        errors.push(modeLabel);
+                        continue; // skip failed mode, keep going
+                    }
+
+                    // Correction: how much to RAISE the reading so the zero sits at 0 V
+                    const corr = -mid;
+                    const rateKey = rateZeroRateKey(rate, oscState.biasEnabled);
+                    if (!map[resKey][rateKey]) map[resKey][rateKey] = [null, null, null, null];
+                    map[resKey][rateKey][channel] = corr;
+                    saveRateZeroMap(map);
+                }
+            }
+            if (errors.length > 0) {
+                report(`Done with errors on: ${errors.join(", ")}`);
+            } else {
+                report('Done — corrections stored for all modes');
+            }
+            return map;
+        } finally {
+            oscState.sampleRateKHz = orig.rate;
+            oscState.channel = orig.channel;
+            oscState.multiChannel = orig.multiChannel;
+            oscState.activeChannels = orig.activeChannels;
+            oscState.triggerMode = orig.triggerMode;
+            oscState.oversample = orig.oversample;
+            oscState.resolution = orig.resolution;
+            oscState.adcRes = orig.adcRes;
+            const resSel = document.getElementById('cfgOscResolution');
+            if (resSel) resSel.value = String(orig.resolution);
+            oscState.biasEnabled = orig.biasEnabled;
+            oscState.divider = orig.divider;
+            oscRateCapture = null;
+            if (window.Calibration) window.Calibration._calibrationBusy = false;
+            if (wasRunning) {
+                startOsc();
+            } else if (oscState.running) {
+                stopOsc();
+            }
         }
     }
 
@@ -438,6 +663,65 @@
         }
     }
 
+    // Red input voltage limit lines.
+    // Divider probe (±30V): always drawn as in bias-ON mode —
+    // +/- (vDda/2)*21 (~+/-34.65 V nominal), regardless of the actual bias state.
+    // Direct input (0..3.3V): 0 .. vDda (~+3.3 V).
+    function drawLimitLines(w, h) {
+        const vDda = (window.Calibration && window.Calibration.vDda) || oscState.vRef || 3.3;
+
+        let vMaxLim, vMinLim, lblMax, lblMin;
+        if (oscState.divider > 1.0) {
+            const divider = 21.0;
+            vMaxLim = (vDda / 2.0) * divider;
+            vMinLim = -(vDda / 2.0) * divider;
+            lblMax = '+' + vMaxLim.toFixed(1) + 'V MAX';
+            lblMin = vMinLim.toFixed(1) + 'V MIN';
+        } else {
+            vMaxLim = vDda;
+            vMinLim = 0.0;
+            lblMax = '+' + vMaxLim.toFixed(1) + 'V MAX';
+            lblMin = '0V MIN';
+        }
+
+        const totalVolts = oscState.voltsPerDiv * GRID_DIVISIONS_Y;
+        const centerV = oscState.yOffset * oscState.voltsPerDiv;
+        const toY = (v) => h / 2 - ((v - centerV) / totalVolts) * h;
+
+        ctx.font = '9px JetBrains Mono, monospace';
+
+        [[vMaxLim, lblMax], [vMinLim, lblMin]].forEach(([vLim, label]) => {
+            const y = toY(vLim);
+
+            // Fill the out-of-range zone between the line and the screen edge
+            if (y > 0 && vLim === vMaxLim && y < h) {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+                ctx.fillRect(0, 0, w, y);
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.moveTo(0, Math.round(y) + 0.5);
+                ctx.lineTo(w, Math.round(y) + 0.5);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#ef4444';
+                ctx.fillText(label, w - ctx.measureText(label).width - 6, y - 4);
+            } else if (y >= 0 && vLim === vMinLim && y < h) {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+                ctx.fillRect(0, y, w, h - y);
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.moveTo(0, Math.round(y) + 0.5);
+                ctx.lineTo(w, Math.round(y) + 0.5);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#ef4444';
+                ctx.fillText(label, w - ctx.measureText(label).width - 6, y + 11);
+            }
+        });
+    }
+
     function drawWaveform(samples, w, h, triggerRes, colorIdx) {
         if (!samples || samples.length < 2) return;
 
@@ -592,6 +876,12 @@
             ctx.fillText('ETS', w - 60, 42);
         }
 
+        // Bias state indicator (auto-polarity mode)
+        if (oscState.autoPolarity && isOsc30VMode()) {
+            ctx.fillStyle = oscState.biasEnabled ? '#22c55e' : '#64748b';
+            ctx.fillText(oscState.biasEnabled ? 'BIAS ON' : 'BIAS OFF', w - 60, 56);
+        }
+
 
 
         // Trigger status
@@ -627,6 +917,7 @@
         }
 
         drawGrid(w, h);
+        drawLimitLines(w, h);
 
         const sampleRate = oscState.calculatedSampleRate || 913000;
 
@@ -794,16 +1085,29 @@
         // Don't push new data if single-captured
         if (oscState.triggerMode === 'single' && oscState.singleCaptured) return;
 
+        // Auto-polarity: switch bias between frames (like the voltmeter)
+        maybeAutoBias(dataPayload, (oscState.resolution === 12) ? 2 : 1);
+
         const bytesPerSample = (oscState.resolution === 12) ? 2 : 1;
 
         const convertChannel = (bytes, ch) => {
             const n = Math.floor(bytes.length / bytesPerSample);
             const f = new Float64Array(n);
+            const cap = oscRateCapture;
+            const captureRaw = cap && cap.active && cap.ch === ch;
             if (bytesPerSample === 2) {
                 const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-                for (let i = 0; i < n; i++) f[i] = rawToVolts(view.getUint16(i * 2, true), ch);
+                for (let i = 0; i < n; i++) {
+                    const raw = view.getUint16(i * 2, true);
+                    if (captureRaw) { cap.sum += raw; cap.count++; }
+                    f[i] = rawToVolts(raw, ch);
+                }
             } else {
-                for (let i = 0; i < n; i++) f[i] = rawToVolts(bytes[i], ch);
+                for (let i = 0; i < n; i++) {
+                    const raw = bytes[i];
+                    if (captureRaw) { cap.sum += raw; cap.count++; }
+                    f[i] = rawToVolts(raw, ch);
+                }
             }
             return f;
         };
@@ -830,6 +1134,8 @@
             oscState.currentFrame = frame;
         }
 
+        oscState.frameSeq = (oscState.frameSeq || 0) + 1;
+
         // Update actual rate based on frames received (optional, mostly for debugging)
         oscState.actualRateSamples += 1; // 1 frame
         let now = performance.now();
@@ -841,6 +1147,62 @@
 
             oscState.actualRateSamples = 0;
             oscState.actualRateTimestamp = now;
+        }
+    }
+
+    // ======================== Auto-Polarity (Bias) ========================
+    // Like the voltmeter: with bias OFF, a negative input clamps the ADC at 0 raw
+    // (maxRaw <= 2) -> turn bias ON. With bias ON, a floating or positive input sits
+    // at/above mid-rail (avgRaw >= 2000) -> turn bias OFF. Requires several
+    // consecutive frames to vote and a cooldown, and only switches between frames.
+    function maybeAutoBias(dataPayload, bytesPerSample) {
+        if (!oscState.autoPolarity) return;
+        if (!isOsc30VMode()) return;
+        if (window.Calibration && window.Calibration._calibrationBusy) return;
+        const now = performance.now();
+        if (now - oscState.autoBiasLastSwitch < 1000) return;
+
+        let mn = Infinity, mx = -Infinity, sum = 0, n = 0;
+        if (bytesPerSample === 2) {
+            const view = new DataView(dataPayload.buffer, dataPayload.byteOffset, dataPayload.byteLength);
+            for (let i = 0; i + 1 < dataPayload.length; i += 2) {
+                const v = view.getUint16(i, true);
+                if (v < mn) mn = v;
+                if (v > mx) mx = v;
+                sum += v;
+                n++;
+            }
+        } else {
+            for (let i = 0; i < dataPayload.length; i++) {
+                const v = dataPayload[i];
+                if (v < mn) mn = v;
+                if (v > mx) mx = v;
+                sum += v;
+                n++;
+            }
+        }
+        if (n === 0) return;
+        const avg = sum / n;
+
+        let want = null;
+        if (!oscState.biasEnabled && mx <= 2) {
+            want = true;   // clamped at GND -> negative input, need bias
+        } else if (oscState.biasEnabled && avg >= 2000) {
+            want = false;  // at/above mid-rail -> floating or positive
+        }
+
+        if (want === null || want === oscState.biasEnabled) {
+            oscState.autoBiasVotes = 0;
+            return;
+        }
+
+        oscState.autoBiasVotes++;
+        if (oscState.autoBiasVotes >= 4) {
+            oscState.autoBiasVotes = 0;
+            oscState.autoBiasLastSwitch = now;
+            oscState.biasEnabled = want;
+            oscState.divider = want ? 21.0 : 11.0;
+            restartOsc(); // bias flag + trigger level are sent in the start payload
         }
     }
 
@@ -1021,6 +1383,8 @@
             oscState.divider = gainRatio;
             oscState.biasEnabled = biasEnabled;
             oscState.autoPolarity = autoPolarity;
+            oscState.autoBiasVotes = 0;
+            oscState.autoBiasLastSwitch = performance.now(); // cooldown after manual change
         }
 
         if (cfgOscVoltRange) {
@@ -1059,10 +1423,8 @@
             let cappedVal = currentVal;
             if (is12bit && cappedVal > 2800) cappedVal = 2800;
             if (isMulti && cappedVal >= 5000) cappedVal = 2000;
-            if (cappedVal !== currentVal) {
-                cfgOscSampleRate.value = String(cappedVal);
-                oscState.sampleRateKHz = cappedVal;
-            }
+            cfgOscSampleRate.value = String(cappedVal);
+            oscState.sampleRateKHz = cappedVal;
         }
 
         if (cfgOscSampleRate) {
@@ -1113,7 +1475,14 @@
 
         function updateOscZeroBadge() {
             if (!window.Calibration) return;
-            const offset = window.Calibration.zeroOffsets[oscState.channel] || 0.0;
+            // Show the per-mode correction (what actually affects the display);
+            // fall back to the global bias/zero offset if the mode isn't calibrated.
+            let offset = getRateZeroCorr(oscState.channel);
+            if (offset === 0) {
+                offset = oscState.biasEnabled
+                    ? (window.Calibration.biasOffsets[oscState.channel] || 0.0)
+                    : (window.Calibration.zeroOffsets[oscState.channel] || 0.0);
+            }
             const hasOffset = Math.abs(offset) > 0.0001;
             const txt = (offset >= 0 ? '+' : '') + offset.toFixed(3) + ' V';
 
@@ -1135,25 +1504,83 @@
             }
         }
 
-        const doCalibOscZero = () => {
-            if (!window.Calibration) return;
-            if (!oscState.currentFrame || oscState.currentFrame.length === 0) {
-                alert("Please Start Oscilloscope first to capture zero baseline.");
-                return;
+        let oscZeroCalibBusy = false;
+        const doCalibOscZero = async () => {
+            if (!window.Calibration || oscZeroCalibBusy) return;
+            const ch = oscState.channel;
+            const btns = [btnOscZeroCalib, btnOscCalibTab].filter(Boolean);
+            const origLabels = btns.map(b => b.innerHTML);
+            const setBtns = (t, dis) => btns.forEach((b, i) => { if (t !== null) b.innerHTML = t; b.disabled = dis; });
+
+            oscZeroCalibBusy = true;
+            setBtns('⏳ 0%', true);
+            const wasRunning = oscState.running;
+            try {
+                if (!wasRunning) startOsc();
+
+                // Oversample the zero: average the (Vmax+Vmin)/2 midpoint of many
+                // frames so the trace is re-centered exactly on 0 V.
+                const FRAMES = 24;
+                const grabFrame = () => oscState.multiChannel
+                    ? (oscState.multiFrames && oscState.multiFrames[ch])
+                    : oscState.currentFrame;
+                let lastSeq = oscState.frameSeq || 0;
+                let acc = 0, used = 0;
+                for (let f = 0; f < FRAMES; f++) {
+                    const t0 = performance.now();
+                    while ((oscState.frameSeq || 0) === lastSeq && performance.now() - t0 < 600) {
+                        await sleepMs(10);
+                    }
+                    if ((oscState.frameSeq || 0) === lastSeq) break; // stream stalled
+                    lastSeq = oscState.frameSeq;
+                    const fr = grabFrame();
+                    if (!fr || fr.length === 0) continue;
+                    let mn = Infinity, mx = -Infinity;
+                    for (let i = 0; i < fr.length; i++) {
+                        if (fr[i] < mn) mn = fr[i];
+                        if (fr[i] > mx) mx = fr[i];
+                    }
+                    acc += (mn + mx) / 2;
+                    used++;
+                    setBtns('⏳ ' + Math.round((used / FRAMES) * 100) + '%', true);
+                }
+                if (!wasRunning) stopOsc();
+
+                if (used === 0) {
+                    alert("No frames captured — connect the probe and make sure the trigger mode allows capture (Auto).");
+                    return;
+                }
+                const avg = acc / used;
+
+                // Store the correction (how much to raise the reading) for the
+                // current mode — resolution x sample rate x bias x channel.
+                const corr = -avg;
+                const map = loadRateZeroMap();
+                const resKey = String(oscState.resolution);
+                const rateKey = rateZeroRateKey(oscState.sampleRateKHz, oscState.biasEnabled);
+                if (!map[resKey]) map[resKey] = {};
+                if (!map[resKey][rateKey]) map[resKey][rateKey] = [null, null, null, null];
+                map[resKey][rateKey][ch] = corr;
+                saveRateZeroMap(map);
+            } finally {
+                oscZeroCalibBusy = false;
+                btns.forEach((b, i) => { b.innerHTML = origLabels[i]; b.disabled = false; });
+                updateOscZeroBadge();
             }
-            let sum = 0;
-            for (let i = 0; i < oscState.currentFrame.length; i++) {
-                sum += oscState.currentFrame[i];
-            }
-            const avg = sum / oscState.currentFrame.length;
-            window.Calibration.calibrateZero(oscState.channel, avg);
-            updateOscZeroBadge();
         };
 
         const doResetOscZero = (e) => {
             if (e) { e.preventDefault(); e.stopPropagation(); }
             if (!window.Calibration) return;
-            window.Calibration.resetZero(oscState.channel);
+            window.Calibration.resetZero(oscState.biasEnabled, oscState.channel);
+            // Also clear the per-mode correction for the current mode
+            const map = loadRateZeroMap();
+            const resMap = map[String(oscState.resolution)];
+            const rateKey = rateZeroRateKey(oscState.sampleRateKHz, oscState.biasEnabled);
+            if (resMap && Array.isArray(resMap[rateKey])) {
+                resMap[rateKey][oscState.channel] = null;
+                saveRateZeroMap(map);
+            }
             updateOscZeroBadge();
         };
 
@@ -1182,6 +1609,67 @@
 
         // Register data listener
         microTester.addDataListener(onUsbData);
+
+        // --- Per-Rate Zero Calibration (Manual, Calibration panel) ---
+        window.OscilloscopeCalibration = { runRateZeroCalibration, loadRateZeroMap };
+
+        const btnOscRateZero = document.getElementById('btnOscRateZeroCalib');
+        const btnOscRateZeroReset = document.getElementById('btnOscRateZeroReset');
+        const rateZeroChSel = document.getElementById('oscRateZeroCh');
+        const rateZeroStatus = document.getElementById('oscRateZeroStatus');
+        const rateZeroInfo = document.getElementById('oscRateZeroInfo');
+
+        const updateRateZeroInfo = () => {
+            if (!rateZeroInfo || !rateZeroChSel) return;
+            const ch = parseInt(rateZeroChSel.value, 10);
+            const { calibrated, total } = getRateZeroModeCount(ch);
+            if (calibrated === 0) {
+                rateZeroInfo.innerHTML = `No rate-zero data for CH${ch + 1} (${oscState.biasEnabled ? 'BIAS' : 'NO-BIAS'}) yet`;
+                return;
+            }
+            // Show only the current mode's correction, not the whole table
+            const corr = getRateZeroCorr(ch);
+            rateZeroInfo.innerHTML =
+                `Calibrated modes: ${calibrated}/${total} for CH${ch + 1} (${oscState.biasEnabled ? 'BIAS' : 'NO-BIAS'}). ` +
+                `Current mode (${oscState.resolution}-bit @ ${oscState.sampleRateKHz} kHz): ` +
+                `<b style="color:#4ade80">${corr >= 0 ? '+' : ''}${corr.toFixed(2)} V</b>`;
+        };
+
+        if (btnOscRateZero) {
+            btnOscRateZero.addEventListener('click', async () => {
+                const ch = rateZeroChSel ? parseInt(rateZeroChSel.value, 10) : oscState.channel;
+                btnOscRateZero.disabled = true;
+                try {
+                    await runRateZeroCalibration(ch, (msg) => { if (rateZeroStatus) rateZeroStatus.innerText = msg; });
+                    if (rateZeroStatus && !rateZeroStatus.innerText.startsWith('Done')) {
+                        rateZeroStatus.innerText = 'Done — corrections stored for all modes';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    if (rateZeroStatus) rateZeroStatus.innerText = 'Error: ' + e.message;
+                }
+                btnOscRateZero.disabled = false;
+                updateRateZeroInfo();
+            });
+        }
+
+        if (btnOscRateZeroReset) {
+            btnOscRateZeroReset.addEventListener('click', () => {
+                const ch = rateZeroChSel ? parseInt(rateZeroChSel.value, 10) : oscState.channel;
+                const map = loadRateZeroMap();
+                for (const resKey in map) {
+                    for (const rateKey in map[resKey]) {
+                        if (Array.isArray(map[resKey][rateKey])) map[resKey][rateKey][ch] = null;
+                    }
+                }
+                saveRateZeroMap(map);
+                if (rateZeroStatus) rateZeroStatus.innerText = 'Reset';
+                updateRateZeroInfo();
+            });
+        }
+
+        if (rateZeroChSel) rateZeroChSel.addEventListener('change', updateRateZeroInfo);
+        updateRateZeroInfo();
     });
 
     // ======================== Start / Stop / Restart ========================
@@ -1230,7 +1718,7 @@
             vz = oscState.biasEnabled ? (window.Calibration.biasOffsets[reqChannel] || 0) : (window.Calibration.zeroOffsets[reqChannel] || 0);
         }
         if (oscState.biasEnabled && vz === 0) {
-            vz = 33.0 / oscState.divider; // Fallback to theoretical
+            vz = ((window.Calibration && window.Calibration.vDda) || oscState.vRef) / 2.0; // Mid-rail bias
         }
         trigV = (trigV / oscState.divider) + vz;
         let trigRaw = (trigV / oscState.vRef) * oscState.adcRes;
@@ -1334,7 +1822,7 @@
             vz = oscState.biasEnabled ? (window.Calibration.biasOffsets[reqChannel] || 0) : (window.Calibration.zeroOffsets[reqChannel] || 0);
         }
         if (oscState.biasEnabled && vz === 0) {
-            vz = 33.0 / oscState.divider; // Fallback to theoretical
+            vz = ((window.Calibration && window.Calibration.vDda) || oscState.vRef) / 2.0; // Mid-rail bias
         }
         trigV = (trigV / oscState.divider) + vz;
         let trigRaw = Math.max(0, Math.min(oscState.adcRes, Math.round((trigV / oscState.vRef) * oscState.adcRes)));

@@ -18,12 +18,16 @@ const CMD_LOGIC_START = 0x40;
 const CMD_LOGIC_STOP  = 0x41;
 const CMD_COMP_TEST  = 0x50;
 const CMD_COMP_STOP  = 0x51;
+const CMD_FR_START   = 0x60;
+const CMD_FR_STEP    = 0x61;
+const CMD_FR_STOP    = 0x62;
 
 const PKT_VOLTMETER_DATA     = 0x10;
 const PKT_OSCILLOSCOPE_DATA  = 0x12;
 const PKT_VREF_DATA          = 0x20;
 const PKT_LOGIC_DATA         = 0x40;
 const PKT_COMP_RESULT        = 0x50;
+const PKT_FR_DATA            = 0x60;
 
 class MicroTesterUSB {
     constructor() {

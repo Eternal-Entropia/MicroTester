@@ -4,6 +4,7 @@
 #include "pwm_gen.h"
 #include "sigma_delta_dac.h"
 #include "comp_tester.h"
+#include "freq_resp.h"
 
 bool oscMode = false; // true = oscilloscope, false = voltmeter
 
@@ -51,6 +52,7 @@ void setup() {
   pwm_gen_init();
   sigma_delta_dac_init();
   comp_tester_init();
+  fr_init();
 }
 
 void loop() {
@@ -144,14 +146,15 @@ void loop() {
     else if (cmd == CMD_SIG_STOP) {
       pwm_gen_stop();
     }
-    else if (cmd == CMD_SIGMA_DELTA_START && len >= 3) {
+    else if (cmd == CMD_SIGMA_DELTA_START && len >= 4) {
       uint8_t pin = payload[0];
-      uint16_t bufLen = (uint16_t)payload[1] | ((uint16_t)payload[2] << 8);
+      uint8_t prescalerExp = payload[1];
+      uint16_t bufLen = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
       
-      sigma_delta_dac_prepare(pin, bufLen);
+      sigma_delta_dac_prepare(pin, bufLen, prescalerExp);
 
-      const uint8_t* bitstream = (len > 3) ? &payload[3] : NULL;
-      uint16_t initialLen = (len > 3) ? (len - 3) : 0;
+      const uint8_t* bitstream = (len > 4) ? &payload[4] : NULL;
+      uint16_t initialLen = (len > 4) ? (len - 4) : 0;
       if (initialLen > 0) {
         sigma_delta_dac_write_chunk(0, bitstream, initialLen);
       }
@@ -180,7 +183,10 @@ void loop() {
       oscMode = false;
       uint8_t mode = 0;
       if (len >= 1) mode = payload[0];
-      comp_tester_start(mode);
+      // Optional oversampling payload: [mode, ovLo, ovHi] (128..1024, backward compatible)
+      uint16_t compOversample = 128;
+      if (len >= 3) compOversample = (uint16_t)payload[1] | ((uint16_t)payload[2] << 8);
+      comp_tester_start(mode, compOversample);
     }
     else if (cmd == CMD_COMP_STOP) {
       comp_tester_stop();
@@ -195,7 +201,57 @@ void loop() {
       rh[0] = (uint32_t)payload[8] | ((uint32_t)payload[9] << 8) | ((uint32_t)payload[10] << 16) | ((uint32_t)payload[11] << 24);
       rh[1] = (uint32_t)payload[12] | ((uint32_t)payload[13] << 8) | ((uint32_t)payload[14] << 16) | ((uint32_t)payload[15] << 24);
       rh[2] = (uint32_t)payload[16] | ((uint32_t)payload[17] << 8) | ((uint32_t)payload[18] << 16) | ((uint32_t)payload[19] << 24);
-      comp_tester_set_cal(vdda_mv, rl, rh);
+      // Optional ESR zero calibration (loop switch+lead resistance, 0.01 ohm units)
+      uint16_t esr_zero_x100 = 0;
+      if (len >= 22) {
+        esr_zero_x100 = (uint16_t)payload[20] | ((uint16_t)payload[21] << 8);
+      }
+      comp_tester_set_cal(vdda_mv, rl, rh, esr_zero_x100);
+    }
+    else if (cmd == CMD_FR_START && len >= 2) {
+      adc_sampler_stop();
+      pwm_gen_stop();
+      sigma_delta_dac_stop();
+      comp_tester_stop();
+      oscMode = false;
+      uint32_t limitHz = (len >= 6) ? ((uint32_t)payload[2] |
+                          ((uint32_t)payload[3] << 8) |
+                          ((uint32_t)payload[4] << 16) |
+                          ((uint32_t)payload[5] << 24)) : FR_DIRECT_LIMIT_HZ;
+      uint8_t oversample = (len >= 7) ? payload[6] : 16;
+      fr_start(payload[0], payload[1], limitHz, oversample);
+    }
+    else if (cmd == CMD_FR_STEP && len >= 5) {
+      uint32_t freq = (uint32_t)payload[0] |
+                      ((uint32_t)payload[1] << 8) |
+                      ((uint32_t)payload[2] << 16) |
+                      ((uint32_t)payload[3] << 24);
+      uint8_t mode = payload[4]; // outer guard is len >= 5, so payload[4] is always valid
+      uint32_t value = 0;
+      bool ok = fr_measure_point(freq, mode, &value);
+
+      uint8_t packet[16];
+      packet[0] = PKT_FR_DATA;
+      packet[1] = 13;
+      packet[2] = 0;
+      packet[3] = freq & 0xFF;
+      packet[4] = (freq >> 8) & 0xFF;
+      packet[5] = (freq >> 16) & 0xFF;
+      packet[6] = (freq >> 24) & 0xFF;
+      packet[7] = ok ? mode : 0xFF;
+      packet[8] = value & 0xFF;
+      packet[9] = (value >> 8) & 0xFF;
+      packet[10] = (value >> 16) & 0xFF;
+      packet[11] = (value >> 24) & 0xFF;
+      packet[12] = fr_last_n & 0xFF;
+      packet[13] = (fr_last_n >> 8) & 0xFF;
+      packet[14] = fr_last_rate_khz & 0xFF;
+      packet[15] = (fr_last_rate_khz >> 8) & 0xFF;
+      usb_web.write(packet, 16);
+      usb_web.flush();
+    }
+    else if (cmd == CMD_FR_STOP) {
+      fr_stop();
     }
   }
 
@@ -269,5 +325,6 @@ void line_state_callback(bool connected) {
     pwm_gen_stop();
     sigma_delta_dac_stop();
     comp_tester_stop();
+    fr_stop();
   }
 }

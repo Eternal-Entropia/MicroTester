@@ -39,7 +39,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateZeroBadge() {
         if (!window.Calibration) return;
-        const offset = window.Calibration.zeroOffsets[voltConfig.channel] || 0.0;
+        const offset = voltConfig.biasEnabled
+            ? (window.Calibration.biasOffsets[voltConfig.channel] || 0.0)
+            : (window.Calibration.zeroOffsets[voltConfig.channel] || 0.0);
         const hasOffset = Math.abs(offset) > 0.0001;
         const txt = (offset >= 0 ? '+' : '') + offset.toFixed(3) + ' V';
 
@@ -63,14 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const doCalibZero = () => {
         if (!window.Calibration) return;
-        window.Calibration.calibrateZero(voltConfig.channel, voltConfig.lastRawVin);
+        window.Calibration.calibrateZero(voltConfig.biasEnabled, voltConfig.channel, voltConfig.lastRawVin);
         updateZeroBadge();
     };
 
     const doResetZero = (e) => {
         if (e) { e.preventDefault(); e.stopPropagation(); }
         if (!window.Calibration) return;
-        window.Calibration.resetZero(voltConfig.channel);
+        window.Calibration.resetZero(voltConfig.biasEnabled, voltConfig.channel);
         updateZeroBadge();
     };
 
