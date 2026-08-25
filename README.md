@@ -13,14 +13,14 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 - **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
-- **Signal Generator**: Programmable PWM signal generation and waveform outputs.
+- **Signal Generator**: Programmable PWM and sine,sawtooth signal generation.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
   - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
   - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
   - **MOSFETs (N-Ch / P-Ch)**: $V_{th}$, Gate Capacitance ($C_g$), $R_{ds(on)}$, Pinout (G, D, S), and Body Diode $V_f$
-  - **Inductors & Coils**: Inductance (10 µH .. 1000 H), $R_{dc}$, Q-factor, and Reactance ($X_L$)
+  - **Inductors & Coils**: • Inductance (L): 10 µH .. 1000 H • DC Resistance (Rdc), Q Factor & Reactance (XL)
 
 ---
 
@@ -50,4 +50,12 @@ beta v2.1: fix pinout for component tester
 beta v3: Added new calibration. fix bugs. added bugs. now component tester measures mosfet
 ETS work on aliasing signals.
 
-beta v4: added Signal generator. update design. added 3.3v in voltage range
+beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
+
+beta v5: added PWA and icon. added inductors in component tester. minor fix
+
+Release v1: added Freq. responce. fix auto bias on oscilloscope. added settings and more minor fix
+
+Lib usage in project:
+
+usbdfu: https://github.com/devanlai/webdfu
