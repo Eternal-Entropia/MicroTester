@@ -14,13 +14,14 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 - **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
 - **Signal Generator**: Programmable PWM and sine,sawtooth signal generation.
+- **Frequency Response**: Measure filters and resonant circuits.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
   - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
   - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
   - **MOSFETs (N-Ch / P-Ch)**: $V_{th}$, Gate Capacitance ($C_g$), $R_{ds(on)}$, Pinout (G, D, S), and Body Diode $V_f$
-  - **Inductors & Coils**: • Inductance (L): 10 µH .. 1000 H • DC Resistance (Rdc), Q Factor & Reactance (XL)
+  - **Inductors & Coils**: • Inductance (L): 50 µH .. 1000 H • DC Resistance (Rdc), Q Factor & Reactance (XL)
 
 ---
 
@@ -35,9 +36,9 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 ## Getting Started
 
-1. **Flash Firmware**: Compile and upload the firmware in `firmware/MicroTester` to your STM32F401 (Black Pill) using Arduino IDE / STM32Duino.
-2. **Launch Web UI**: Open `web/start.html` or `web/main.html` in your browser.
-3. **Connect**: Connect your MCU via Serial/WebUSB and start measuring!
+1. **Launch Web UI**: Open [site](https://eternal-entropia.github.io/MicroTester/web/start.html) or `web/start.html` in your browser.
+2. **Flash Firmware**: upload the firmware in browser to your MCU.
+3. **Connect**: Connect your MCU via WebUSB and start measuring!
 
 ## Release History
 
