@@ -57,6 +57,8 @@ beta v5: added PWA and icon. added inductors in component tester. minor fix
 
 Release v1: added Freq. responce. fix auto bias on oscilloscope. added settings and more minor fix
 
+Release v1.1: added link in hydra fw port. ui minor fix
+
 Lib usage in project:
 
 usbdfu: https://github.com/devanlai/webdfu
