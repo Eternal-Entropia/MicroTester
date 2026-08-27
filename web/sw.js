@@ -1,5 +1,5 @@
 // MicroTester Progressive Web App - Service Worker
-const CACHE_NAME = 'microtester-rv1';
+const CACHE_NAME = 'microtester-rv1.1';
 
 const ASSETS_TO_CACHE = [
   './',

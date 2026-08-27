@@ -30,10 +30,13 @@
 }
 
 @keyframes logoSubtleShimmer {
-    0%, 100% {
+
+    0%,
+    100% {
         background-position: 0% 50%;
         filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.25));
     }
+
     50% {
         background-position: 100% 50%;
         filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.45));
@@ -145,6 +148,8 @@
     background: none;
     width: 100%;
     text-align: left;
+    text-decoration: none;
+    box-sizing: border-box;
 }
 
 .nav-item:hover {
