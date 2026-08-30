@@ -34,6 +34,35 @@ bool robust_write(const uint8_t* data, uint16_t len) {
     return written == len;
 }
 
+void set_board_led(bool on) {
+#if defined(ARDUINO_ARCH_STM32)
+  RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+  GPIOC->MODER = (GPIOC->MODER & ~(3U << (13 * 2))) | (1U << (13 * 2)); // Output mode
+  GPIOC->OTYPER &= ~(1U << 13); // Push-pull
+  GPIOC->OSPEEDR = (GPIOC->OSPEEDR & ~(3U << (13 * 2))) | (2U << (13 * 2)); // High speed
+  if (on) {
+    GPIOC->BSRR = (1U << (13 + 16)); // Set pin low (PC13 Active Low -> LED ON)
+  } else {
+    GPIOC->BSRR = (1U << 13);        // Set pin high (PC13 Active Low -> LED OFF)
+  }
+#elif defined(LED_BUILTIN)
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
+#endif
+}
+
+#if defined(ARDUINO_ARCH_STM32)
+extern "C" {
+  void tud_umount_cb(void) {
+    line_state_callback(false);
+  }
+  void tud_suspend_cb(bool remote_wakeup_en) {
+    (void)remote_wakeup_en;
+    line_state_callback(false);
+  }
+}
+#endif
+
 void setup() {
 #if defined(ARDUINO_ARCH_STM32)
   TinyUSB_Device_Init(0);
@@ -43,6 +72,9 @@ void setup() {
   TinyUSBDevice.setProductDescriptor("MicroTester Board");
 
   SerialTinyUSB.begin(115200);
+
+  // Initialize LED (off until USB connected)
+  set_board_led(false);
 
   // Configure WebUSB
   usb_web.setLineStateCallback(line_state_callback);
@@ -61,6 +93,16 @@ void loop() {
   TinyUSB_Device_FlushCDC();
 #endif
 
+  // Track USB connection state transitions independently
+  static bool wasConnected = false;
+  bool isConn = usb_web.connected();
+  if (wasConnected && !isConn) {
+    line_state_callback(false);
+  } else if (!wasConnected && isConn) {
+    line_state_callback(true);
+  }
+  wasConnected = isConn;
+
   // 1. Check for incoming WebUSB commands
   if (usb_web.available() >= 2) {
     uint8_t cmd = usb_web.read();
@@ -68,9 +110,14 @@ void loop() {
 
     uint8_t payload[64];
     uint8_t bytesRead = 0;
-
-    while (bytesRead < len && usb_web.available()) {
-      payload[bytesRead++] = usb_web.read();
+    uint32_t t0 = millis();
+    while (bytesRead < len && (millis() - t0 < 50)) {
+      if (usb_web.available()) {
+        payload[bytesRead++] = usb_web.read();
+      }
+    }
+    if (bytesRead < len) {
+      return;
     }
 
     if (cmd == CMD_VOLT_START && len >= 2) {
@@ -161,6 +208,9 @@ void loop() {
       
       if (initialLen >= bufLen) {
         sigma_delta_dac_play();
+        uint8_t readyPkt[3] = { PKT_SIGMA_DELTA_READY, 0, 0 };
+        usb_web.write(readyPkt, 3);
+        usb_web.flush();
       }
     }
     else if (cmd == CMD_SIGMA_DELTA_DATA && len >= 2) {
@@ -173,6 +223,9 @@ void loop() {
       
       if (offset + chunkLen >= sigma_delta_dac_get_buf_len()) {
         sigma_delta_dac_play();
+        uint8_t readyPkt[3] = { PKT_SIGMA_DELTA_READY, 0, 0 };
+        usb_web.write(readyPkt, 3);
+        usb_web.flush();
       }
     }
     else if (cmd == CMD_SIGMA_DELTA_STOP) {
@@ -256,7 +309,6 @@ void loop() {
   }
 
   // 2. Run Sampler Loops
-  adc_sampler_loop();
   comp_tester_loop();
 
   // 3.5 Check if ADC sampler has data available
@@ -306,7 +358,7 @@ void loop() {
   if (comp_tester_is_done()) {
     if (usb_web.connected()) {
       CompResult result = comp_tester_get_result();
-      uint8_t packet[23];
+      uint8_t packet[32];
       packet[0] = PKT_COMP_RESULT;
       packet[1] = sizeof(CompResult);
       packet[2] = 0;
@@ -320,11 +372,18 @@ void loop() {
 }
 
 void line_state_callback(bool connected) {
-  if (!connected) {
-    adc_sampler_stop();
-    pwm_gen_stop();
-    sigma_delta_dac_stop();
-    comp_tester_stop();
-    fr_stop();
+  // Always stop all generators on connect AND disconnect for a clean state
+  adc_sampler_stop();
+  pwm_gen_stop();
+  sigma_delta_dac_stop();
+  comp_tester_stop();
+  fr_stop();
+  oscMode = false;
+
+  if (connected) {
+    set_board_led(true); // USB connected -> LED ON
+  } else {
+    set_board_led(false); // USB disconnected -> LED OFF
   }
 }
+

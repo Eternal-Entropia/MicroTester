@@ -578,6 +578,17 @@
     color: var(--success);
 }
 
+.status-badge.waiting {
+    background: rgba(234, 179, 8, 0.18);
+    color: #eab308;
+    animation: pulse-wait 1.0s ease-in-out infinite;
+}
+
+@keyframes pulse-wait {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.97); }
+}
+
 /* ---- Placeholder ---- */
 .panel-placeholder {
     display: flex;

@@ -32,15 +32,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultSecondary = document.getElementById('compResultSecondary');
     const resultPinout = document.getElementById('compResultPinout');
     const compProbeMap = document.getElementById('compProbeMap');
-    
+
     let testing = false;
-    
+    let compTestTimeoutTimer = null;
+
     // Enable/disable based on USB connection
     setInterval(() => {
         if (btnTest) btnTest.disabled = !microTester.device || testing;
         if (btnSmallCap) btnSmallCap.disabled = !microTester.device || testing;
     }, 1000);
-    
+
     function updateCompIndicator(active) {
         const compIndicator = document.getElementById('compIndicator');
         if (compIndicator) {
@@ -87,25 +88,136 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- Component Tester Debug Log System (Browser-Side) ---
+    const cfgShowDebugLog = document.getElementById('cfgShowDebugLog');
+    const compDebugLogCard = document.getElementById('compDebugLogCard');
+    const compDebugLogContent = document.getElementById('compDebugLogContent');
+    const compDebugLogCount = document.getElementById('compDebugLogCount');
+    const btnCompDebugClear = document.getElementById('btnCompDebugClear');
+    const btnCompDebugCopy = document.getElementById('btnCompDebugCopy');
+
+    let compDebugEventCount = 0;
+
+    function isDebugLogEnabled() {
+        if (cfgShowDebugLog) return cfgShowDebugLog.checked;
+        return localStorage.getItem('microtester_show_debug_log') === 'true';
+    }
+
+    function syncDebugLogs(enabled) {
+        localStorage.setItem('microtester_show_debug_log', enabled ? 'true' : 'false');
+        if (cfgShowDebugLog && cfgShowDebugLog.checked !== enabled) {
+            cfgShowDebugLog.checked = enabled;
+        }
+        if (compDebugLogCard) {
+            compDebugLogCard.style.display = enabled ? 'block' : 'none';
+        }
+        const frDebugLogCard = document.getElementById('frDebugLogCard');
+        if (frDebugLogCard) {
+            frDebugLogCard.style.display = enabled ? '' : 'none';
+        }
+    }
+
+    function compLog(msg, level = 'info', rawBytes = null) {
+        if (!isDebugLogEnabled()) return;
+
+        compDebugEventCount++;
+        if (compDebugLogCount) compDebugLogCount.innerText = `${compDebugEventCount} events`;
+
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+
+        let color = '#cbd5e1'; // default
+        if (level === 'tx') color = '#facc15';       // Yellow for TX
+        else if (level === 'rx') color = '#4ade80';  // Green for RX
+        else if (level === 'warn') color = '#fb923c';// Orange for Warn
+        else if (level === 'err') color = '#f87171';  // Red for Error
+        else if (level === 'calc') color = '#38bdf8'; // Cyan for Calculations
+
+        let hexDump = '';
+        if (rawBytes && rawBytes.length) {
+            const hexArray = Array.from(rawBytes).map(b => '0x' + b.toString(16).padStart(2, '0').toUpperCase());
+            hexDump = `<div style="color: #94a3b8; font-size: 10.5px; margin-left: 12px; margin-top: 2px;">HEX [${rawBytes.length}B]: ${hexArray.join(' ')}</div>`;
+        }
+
+        const logLine = document.createElement('div');
+        logLine.style.marginBottom = '4px';
+        logLine.innerHTML = `<span style="color: #64748b;">[${timeStr}]</span> <span style="color: ${color}; font-weight: 500;">${msg}</span>${hexDump}`;
+
+        if (compDebugLogContent) {
+            compDebugLogContent.appendChild(logLine);
+            while (compDebugLogContent.children.length > 250) {
+                compDebugLogContent.removeChild(compDebugLogContent.firstChild);
+            }
+            compDebugLogContent.scrollTop = compDebugLogContent.scrollHeight;
+        }
+
+        console.log(`[CompTester ${timeStr}] ${msg}`, rawBytes || '');
+    }
+
+    if (cfgShowDebugLog) {
+        const initialEnabled = localStorage.getItem('microtester_show_debug_log') === 'true';
+        cfgShowDebugLog.checked = initialEnabled;
+        syncDebugLogs(initialEnabled);
+
+        cfgShowDebugLog.addEventListener('change', () => {
+            const enabled = cfgShowDebugLog.checked;
+            syncDebugLogs(enabled);
+            if (enabled) compLog('[SYS] Debug logs enabled', 'info');
+        });
+    } else {
+        syncDebugLogs(localStorage.getItem('microtester_show_debug_log') === 'true');
+    }
+
+    if (btnCompDebugClear) {
+        btnCompDebugClear.addEventListener('click', () => {
+            if (compDebugLogContent) {
+                compDebugLogContent.innerHTML = '<div style="color: #64748b; font-style: italic;">Log cleared.</div>';
+            }
+            compDebugEventCount = 0;
+            if (compDebugLogCount) compDebugLogCount.innerText = '0 events';
+        });
+    }
+
+    if (btnCompDebugCopy) {
+        btnCompDebugCopy.addEventListener('click', () => {
+            if (compDebugLogContent) {
+                const text = compDebugLogContent.innerText;
+                navigator.clipboard.writeText(text).then(() => {
+                    const prevText = btnCompDebugCopy.innerText;
+                    btnCompDebugCopy.innerText = 'Copied!';
+                    setTimeout(() => { btnCompDebugCopy.innerText = prevText; }, 1500);
+                });
+            }
+        });
+    }
+
     // Start test (Normal)
     if (btnTest) {
         btnTest.addEventListener('click', () => {
             if (!microTester.device) return alert('Connect USB first!');
             stopActiveInstruments();
+            if (typeof window.Calibration !== 'undefined' && typeof window.Calibration.sendCompCalToFirmware === 'function') {
+                window.Calibration.sendCompCalToFirmware();
+            }
+            if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             testing = true;
             updateCompIndicator(true);
-            statusEl.innerText = '🔄 Testing...';
+            statusEl.innerText = 'Testing...';
             statusEl.className = 'comp-status testing';
             resultArea.style.display = 'none';
             btnTest.disabled = true;
             if (btnSmallCap) btnSmallCap.disabled = true;
-            microTester.sendCommand(CMD_COMP_TEST, buildCompTestPayload(0)); // Mode = 0 (auto test)
+            const payload = buildCompTestPayload(0);
+            compLog(`[TX] CMD_COMP_TEST: mode=0 (Auto-Test), oversample=${getCompOversample()}x`, 'tx', payload);
+            microTester.sendCommand(CMD_COMP_TEST, payload); // Mode = 0 (auto test)
             // Timeout after 60 seconds (allows large capacitor charging & higher oversampling)
-            setTimeout(() => {
+            compTestTimeoutTimer = setTimeout(() => {
                 if (testing) {
                     testing = false;
+                    compTestTimeoutTimer = null;
                     updateCompIndicator(false);
-                    statusEl.innerText = '⏱ Timeout — no response';
+                    compLog('[TIMEOUT] Microcontroller did not return a response within 60s', 'err');
+                    statusEl.innerText = 'Timeout — no response';
                     statusEl.className = 'comp-status error';
                     btnTest.disabled = false;
                     if (btnSmallCap) btnSmallCap.disabled = false;
@@ -119,19 +231,24 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSmallCap.addEventListener('click', () => {
             if (!microTester.device) return alert('Connect USB first!');
             stopActiveInstruments();
+            if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             testing = true;
             updateCompIndicator(true);
-            statusEl.innerText = '⚡ Testing Small Cap...';
+            statusEl.innerText = 'Testing Small Cap...';
             statusEl.className = 'comp-status testing';
             resultArea.style.display = 'none';
             btnTest.disabled = true;
             btnSmallCap.disabled = true;
-            microTester.sendCommand(CMD_COMP_TEST, buildCompTestPayload(1)); // Mode = 1 (small cap)
-            setTimeout(() => {
+            const payload = buildCompTestPayload(1);
+            compLog(`[TX] CMD_COMP_TEST: mode=1 (Small Cap / pF Mode), oversample=${getCompOversample()}x`, 'tx', payload);
+            microTester.sendCommand(CMD_COMP_TEST, payload); // Mode = 1 (small cap)
+            compTestTimeoutTimer = setTimeout(() => {
                 if (testing) {
                     testing = false;
+                    compTestTimeoutTimer = null;
                     updateCompIndicator(false);
-                    statusEl.innerText = '⏱ Timeout — no response';
+                    compLog('[TIMEOUT] Small cap test timed out after 60s', 'err');
+                    statusEl.innerText = 'Timeout — no response';
                     statusEl.className = 'comp-status error';
                     btnTest.disabled = false;
                     if (btnSmallCap) btnSmallCap.disabled = false;
@@ -143,37 +260,52 @@ document.addEventListener('DOMContentLoaded', () => {
     // Cancel test
     if (btnStop) {
         btnStop.addEventListener('click', () => {
+            if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
+            compLog('[TX] CMD_COMP_STOP (User Cancelled)', 'warn');
             microTester.sendCommand(CMD_COMP_STOP);
             testing = false;
             updateCompIndicator(false);
             statusEl.innerText = 'Cancelled';
             statusEl.className = 'comp-status idle';
             btnTest.disabled = false;
+            if (btnSmallCap) btnSmallCap.disabled = false;
         });
     }
-    
+
     // Data listener for component test results
     microTester.addDataListener((data) => {
         if (!testing) return;
         if (data.length < 3) return;
-        
+
         const pktType = data[0];
         const pktLen = data[1] | (data[2] << 8);
-        
+
         if (pktType !== PKT_COMP_RESULT) return;
-        // CompResult payload = 18 usable bytes + 2 struct padding (ARM EABI);
-        // firmware reports sizeof() in the header. Floored at 18 so flags is readable.
         const resultLen = Math.min(Math.max(pktLen, 18), 32);
         if (data.length < 3 + resultLen) return;
-        
+
+        if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
+
         const payload = data.slice(3, 3 + resultLen);
+        compLog(`[RX] PKT_COMP_RESULT (${resultLen} bytes payload)`, 'rx', payload);
+
         const result = parseCompResult(payload);
+        const typeNames = {
+            0: 'COMP_NONE', 10: 'COMP_RESISTOR', 11: 'COMP_CAPACITOR', 12: 'COMP_INDUCTOR',
+            20: 'COMP_DIODE', 21: 'COMP_BJT', 22: 'COMP_MOSFET',
+            30: 'COMP_SHORT', 31: 'COMP_OPEN'
+        };
+        const vlossText = result.vloss ? `, vloss=${(result.vloss / 10).toFixed(1)}%` : '';
+        compLog(`[PARSED] type=${result.type} (${typeNames[result.type] || 'Unknown'}), probes=[TP${result.pinA + 1}, TP${result.pinB + 1}, TP${result.pinC + 1}], val1=${result.value1}, val2=${result.value2}, val3=${result.value3}, flags=0x${result.flags.toString(16)}${vlossText}`, 'calc');
+
         testing = false;
         updateCompIndicator(false);
         btnTest.disabled = false;
+        if (btnSmallCap) btnSmallCap.disabled = false;
+
         displayResult(result);
     });
-    
+
     function parseCompResult(buf) {
         const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         return {
@@ -184,10 +316,11 @@ document.addEventListener('DOMContentLoaded', () => {
             value1: dv.getUint32(4, true),
             value2: dv.getUint32(8, true),
             value3: (dv.byteLength >= 16) ? dv.getUint32(12, true) : 0,
-            flags: (dv.byteLength >= 18) ? dv.getUint16(16, true) : 0
+            flags: (dv.byteLength >= 18) ? dv.getUint16(16, true) : 0,
+            vloss: (dv.byteLength >= 20) ? dv.getUint16(18, true) : 0
         };
     }
-    
+
     function formatResistance(ohms100) {
         // value1 is in ohms * 100
         const ohms = ohms100 / 100;
@@ -195,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ohms >= 1000) return (ohms / 1000).toFixed(2) + ' kΩ';
         return ohms.toFixed(1) + ' Ω';
     }
-    
+
     function formatCapacitance(pF) {
         if (pF >= 1000000) return (pF / 1000000).toFixed(2) + ' µF';
         if (pF >= 1000) return (pF / 1000).toFixed(2) + ' nF';
@@ -208,12 +341,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (uH >= 1) return uH.toFixed(2) + ' µH';
         return (uH * 1000).toFixed(0) + ' nH';
     }
-    
+
     function displayResult(r) {
         resultArea.style.display = 'block';
         let icon = '', typeName = '', value = '', secondary = '', pinout = '', probeMap = '';
         const probeLabels = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
-        
+
         switch (r.type) {
             case 0:  // COMP_NONE
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="3"/></svg>`;
@@ -225,34 +358,16 @@ document.addEventListener('DOMContentLoaded', () => {
             case 10: // COMP_RESISTOR
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M2 12h4l2-5 4 10 4-10 2 5h4"/></svg>`;
                 let rOffset = 0;
-                let rlA = 680, rlB = 680, rlC = 680;
-                let rhA = 470000, rhB = 470000, rhC = 470000;
-                if (typeof window.Calibration !== 'undefined') {
-                    if (window.Calibration.compOffsetR) rOffset = window.Calibration.compOffsetR;
-                    if (window.Calibration.compRL) {
-                        rlA = window.Calibration.compRL[r.pinA] || 680;
-                        rlB = window.Calibration.compRL[r.pinB] || 680;
-                        if (r.pinC < 3) rlC = window.Calibration.compRL[r.pinC] || 680;
-                    }
-                    if (window.Calibration.compRH) {
-                        rhA = window.Calibration.compRH[r.pinA] || 470000;
-                        rhB = window.Calibration.compRH[r.pinB] || 470000;
-                        if (r.pinC < 3) rhC = window.Calibration.compRH[r.pinC] || 470000;
-                    }
+                if (typeof window.Calibration !== 'undefined' && window.Calibration.compOffsetR) {
+                    rOffset = window.Calibration.compOffsetR;
                 }
-                
-                // Calibration scaling factor for resistor measurement
-                // RL range (<= 138.6kOhm): nominal sum is 680 + 680 = 1360 Ohms
-                // RH range (> 138.6kOhm): nominal sum is 470k + 470k = 940000 Ohms
-                let r1_raw = r.value1 / 100;
-                const scale1 = (r1_raw > 138600) ? ((rhA + rhB) / 940000.0) : ((rlA + rlB) / 1360.0);
-                const r1 = Math.max(0, (r.value1 * scale1) - rOffset);
-                
+
+                // Firmware already computed exact resistance with calibrated RL/RH from MCU RAM
+                const r1 = Math.max(0, r.value1 - rOffset);
+
                 if (r.value2 > 0) {
-                    let r2_raw = r.value2 / 100;
-                    const scale2 = (r2_raw > 138600) ? ((rhB + rhC) / 940000.0) : ((rlB + rlC) / 1360.0);
-                    const r2 = Math.max(0, (r.value2 * scale2) - rOffset);
-                    
+                    const r2 = Math.max(0, r.value2 - rOffset);
+
                     typeName = 'Dual Resistors';
                     value = `R1 = ${formatResistance(r1)}`;
                     secondary = `R2 = ${formatResistance(r2)}`;
@@ -267,75 +382,91 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 11: // COMP_CAPACITOR
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><line x1="3" y1="12" x2="10" y2="12"/><line x1="10" y1="5" x2="10" y2="19" stroke-width="3"/><line x1="14" y1="5" x2="14" y2="19" stroke-width="3"/><line x1="14" y1="12" x2="21" y2="12"/></svg>`;
-                typeName = 'Capacitor';
-                value = formatCapacitance(r.value1);
-                // Secondary (value2): ESR*100 @ 120 Hz; Tertiary (value3): tan(delta)*10000 @ 120 Hz
-                if (r.value2 > 0) {
-                    secondary = `ESR @ 120 Hz: ${(r.value2 / 100).toFixed(2)} Ω`;
-                    if (r.value3 > 0) {
-                        const td = r.value3 / 10000;
-                        const q = td > 0 ? (1 / td) : Infinity;
-                        secondary += `  |  tan δ: ${td.toFixed(3)} (Q ≈ ${q >= 100 ? '≥100' : q.toFixed(1)})`;
-                    }
+                const isPolarized = (r.flags & 0x20) !== 0;
+                typeName = isPolarized ? 'Electrolytic Capacitor' : 'Capacitor';
+
+                // Loss factor tan(delta) @ 1 kHz
+                const td = (r.value3 > 0) ? (r.value3 / 10000.0) : 0;
+
+                // Compensate dielectric absorption / loss overestimation from DC charging using Vloss
+                let cVal = r.value1;
+                if (r.vloss > 0 && r.value1 >= 1000000) {
+                    const vlossFraction = (r.vloss / 10.0) / 100.0; // r.vloss in 0.1% units (e.g. 26 -> 0.026)
+                    const lossDeduction = Math.min(0.35, vlossFraction);
+                    cVal = Math.round(r.value1 * (1.0 - lossDeduction));
                 }
-                // Reactive resistance on PC: Xc = 1 / (2*PI*f*C), f from Settings
-                if (r.value1 > 0) {
-                    const xcFreq = getCompXcFreq();
-                    const cFarad = r.value1 * 1e-12;
-                    const xcOhm = 1.0 / (2.0 * Math.PI * xcFreq * cFarad);
-                    const xcStr = `Xc: ${formatResistance(xcOhm * 100)} @ ${xcFreq} Hz`;
-                    secondary = secondary ? `${secondary}  |  ${xcStr}` : xcStr;
+
+                value = formatCapacitance(cVal);
+
+                // Secondary (value2): ESR*100; Tertiary (value3): tan(delta)*10000 @ 1 kHz; vloss: Vloss in 0.1%
+                let capDetails = [];
+                if (r.value2 !== undefined && cVal >= 1000000) {
+                    capDetails.push(`ESR @ 1 kHz: ${(r.value2 / 100).toFixed(2)} Ω`);
                 }
-                probeMap = `+ ${probeLabels[r.pinA]}  — ${probeLabels[r.pinB]}`;
+                if (r.vloss !== undefined) {
+                    capDetails.push(`Vloss: ${(r.vloss / 10).toFixed(1)}%`);
+                }
+                if (td > 0) {
+                    const q = td > 0 ? (1 / td) : Infinity;
+                    capDetails.push(`tan δ: ${td.toFixed(3)} (Q ≈ ${q >= 100 ? '≥100' : q.toFixed(1)}) @ 1 kHz`);
+                } else if (cVal >= 1000000 && r.value2 !== undefined) {
+                    capDetails.push(`tan δ: 0.000 (Q ≈ ≥100) @ 1 kHz`);
+                }
+                if (cVal > 0) {
+                    const cFarad = cVal * 1e-12;
+                    const xcOhm = 1.0 / (2.0 * Math.PI * 1000.0 * cFarad);
+                    capDetails.push(`Xc: ${formatResistance(xcOhm * 100)} @ 1 kHz`);
+                }
+                secondary = capDetails.join('  |  ');
+
+                if (isPolarized) {
+                    probeMap = `+ ${probeLabels[r.pinA]}  — ${probeLabels[r.pinB]}`;
+                } else {
+                    probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
+                }
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';
                 break;
             case 12: // COMP_INDUCTOR
                 icon = `<svg viewBox="0 0 56 32" width="56" height="32" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"><path d="M 3 20 L 11 20 C 11 8, 20 8, 20 20 C 20 8, 29 8, 29 20 C 29 8, 38 8, 38 20 C 38 8, 47 8, 47 20 L 53 20"/></svg>`;
                 typeName = 'Inductor';
-                
+
                 // r.value1 is transmitted in nH (nano-Henries) to preserve decimal precision (1 uH = 1000 nH)
                 let L_nH = r.value1;
                 let L_uH = L_nH / 1000.0;
                 value = formatInductance(L_uH);
-                
+
                 let rOffset2 = 0;
-                let rlA2 = 680, rlB2 = 680;
-                if (typeof window.Calibration !== 'undefined') {
-                    if (window.Calibration.compOffsetR) rOffset2 = window.Calibration.compOffsetR;
-                    if (window.Calibration.compRL) {
-                        rlA2 = window.Calibration.compRL[r.pinA] || 680;
-                        rlB2 = window.Calibration.compRL[r.pinB] || 680;
-                    }
+                if (typeof window.Calibration !== 'undefined' && window.Calibration.compOffsetR) {
+                    rOffset2 = window.Calibration.compOffsetR;
                 }
-                
-                // Scale Rdc with RL calibration and subtract probe lead resistance (identical to Resistor)
-                let scaleRdc2 = (rlA2 + rlB2) / 1360.0;
-                let rawRdcVal2 = Math.max(0, (r.value2 * scaleRdc2) - rOffset2);
+
+                // Firmware already computed Rdc with calibrated RL from MCU RAM
+                let rawRdcVal2 = Math.max(0, r.value2 - rOffset2);
                 let Rdc2 = rawRdcVal2 / 100.0;
-                
+
                 let freqHz = r.value3 || 100000;
                 let L_henry = L_uH / 1000000.0;
-                
+
                 // Reactive resistance on PC: XL = 2*PI*f*L, f from Settings
                 const xlFreq = getCompXcFreq();
                 const XLs = 2.0 * Math.PI * xlFreq * L_henry;
                 let xlStr = `X_L: ${formatResistance(XLs * 100)} @ ${xlFreq} Hz`;
-                
+
                 // Estimated Self-Resonant Frequency (SRF / f_res) with parasitic C ~ 30 pF
                 let fRes = 1.0 / (2.0 * Math.PI * Math.sqrt(L_henry * 30.0e-12));
                 let fResStr = (fRes >= 1000000) ? (fRes / 1000000).toFixed(2) + ' MHz' : (fRes >= 1000) ? (fRes / 1000).toFixed(1) + ' kHz' : fRes.toFixed(0) + ' Hz';
-                
+
                 let testFreqStr = (freqHz >= 1000000) ? (freqHz / 1000000).toFixed(0) + ' MHz' : (freqHz >= 1000) ? (freqHz / 1000).toFixed(0) + ' kHz' : freqHz + ' Hz';
-                
+
                 if (Rdc2 < 0.05) {
-                    secondary = `R_dc: < 0.1 Ω  |  X_L = ${xlStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
+                    secondary = `R_dc: < 0.1 Ω  |  ${xlStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
                 } else {
                     let fKHz = xlFreq / 1000.0;
                     let rac = Rdc2 * (1.0 + 0.15 * Math.sqrt(fKHz));
                     let Q = XLs / rac;
                     let qStr = (Q >= 100) ? Q.toFixed(0) : Q.toFixed(1);
-                    secondary = `R_dc: ${Rdc2.toFixed(2)} Ω  |  X_L = ${xlStr}  |  Q = ${qStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
+                    secondary = `R_dc: ${Rdc2.toFixed(2)} Ω  |  ${xlStr}  |  Q = ${qStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
                 }
                 probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Component identified';
@@ -345,18 +476,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 icon = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#38bdf8" stroke-width="2"><line x1="2" y1="12" x2="8" y2="12"/><polygon points="8,6 8,18 16,12" fill="rgba(56,189,248,0.2)"/><line x1="16" y1="6" x2="16" y2="18" stroke-width="3"/><line x1="16" y1="12" x2="22" y2="12"/></svg>`;
                 typeName = 'Diode';
                 value = `Vf = ${r.value1} mV`;
-                
+
                 let dType = 'LED';
                 if (r.value1 < 450) dType = 'Schottky';
                 else if (r.value1 < 900) dType = 'Silicon';
                 else if (r.value1 < 1500) dType = 'Silicon / Germanium';
-                
+
                 let current_mA = ((3300 - r.value1) / 1360).toFixed(2);
                 secondary = `Type: ${dType}  |  If ≈ ${current_mA} mA`;
                 if (r.value2 > 0) {
                     secondary += `  |  C = ${formatCapacitance(r.value2)}`;
                 }
-                
+
                 probeMap = `A: ${probeLabels[r.pinA]}  K: ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';
@@ -391,18 +522,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const isNch = !isPch;
                     const chName = isPch ? 'P-Channel' : 'N-Channel';
                     const modeName = (r.flags & 0x20) ? 'Depletion' : 'Enhancement';
-                    
+
                     if (isPch) {
                         icon = `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="3" y1="12" x2="8" y2="12"/><line x1="8" y1="7" x2="8" y2="17"/><line x1="10" y1="7" x2="10" y2="9"/><line x1="10" y1="11" x2="10" y2="13"/><line x1="10" y1="15" x2="10" y2="17"/><line x1="10" y1="7" x2="16" y2="7"/><line x1="16" y1="7" x2="16" y2="4"/><line x1="10" y1="17" x2="16" y2="17"/><line x1="16" y1="17" x2="16" y2="20"/><line x1="10" y1="12" x2="16" y2="12"/><polygon points="14,12 11,10 11,14" fill="#38bdf8"/></svg>`;
                     } else {
                         icon = `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="3" y1="12" x2="8" y2="12"/><line x1="8" y1="7" x2="8" y2="17"/><line x1="10" y1="7" x2="10" y2="9"/><line x1="10" y1="11" x2="10" y2="13"/><line x1="10" y1="15" x2="10" y2="17"/><line x1="10" y1="7" x2="16" y2="7"/><line x1="16" y1="7" x2="16" y2="4"/><line x1="10" y1="17" x2="16" y2="17"/><line x1="16" y1="17" x2="16" y2="20"/><line x1="10" y1="12" x2="16" y2="12"/><polygon points="10,12 13,10 13,14" fill="#38bdf8"/></svg>`;
                     }
-                    
+
                     typeName = `MOSFET (${chName} ${modeName})`;
-                    
+
                     const vthV = (r.value1 / 1000).toFixed(2);
                     value = `Vth = ${vthV} V`;
-                    
+
                     const rdsMohm = r.value2;
                     if (rdsMohm === 0xFFFF || rdsMohm >= 60000) {
                         secondary = `Rds(on) = > 60 Ω (Standard 10V Gate MOSFET, Vgs=3.3V ≤ Vth)`;
@@ -418,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (r.value3 > 0) {
                         secondary += `  |  Cg = ${formatCapacitance(r.value3)}`;
                     }
-                    
+
                     probeMap = `G: ${probeLabels[r.pinA]}  D: ${probeLabels[r.pinB]}  S: ${probeLabels[r.pinC]}`;
                     statusEl.innerText = 'Component identified';
                     statusEl.className = 'comp-status success';
@@ -453,20 +584,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 statusEl.innerText = 'Unknown component';
                 statusEl.className = 'comp-status error';
         }
-        
+
+        compLog(`[DISPLAY] ${typeName}: ${value} ${secondary ? '(' + secondary.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() + ')' : ''} [${probeMap}]`, 'calc');
+
         if (resultIcon) resultIcon.innerHTML = icon;
         if (resultType) resultType.innerText = typeName;
         if (resultValue) resultValue.innerText = value;
-        if (resultSecondary) resultSecondary.innerText = secondary;
+        if (resultSecondary) resultSecondary.innerHTML = secondary;
         if (compProbeMap) compProbeMap.innerText = probeMap;
-        
+
         // Build pinout diagram for all detected components
         if (resultPinout) {
             if (r.type === 10) { // Resistor
                 resultPinout.innerHTML = buildResistorDiagram(r);
                 resultPinout.style.display = 'block';
             } else if (r.type === 11) { // Capacitor
-                resultPinout.innerHTML = buildCapacitorDiagram(r.pinA, r.pinB, r.value1);
+                const isPol = (r.flags & 0x20) !== 0;
+                let cVal = r.value1;
+                if (r.vloss > 0 && r.value1 >= 1000000) {
+                    const vlossFraction = (r.vloss / 10.0) / 100.0;
+                    const lossDeduction = Math.min(0.35, vlossFraction);
+                    cVal = Math.round(r.value1 * (1.0 - lossDeduction));
+                }
+                resultPinout.innerHTML = buildCapacitorDiagram(r.pinA, r.pinB, cVal, isPol);
                 resultPinout.style.display = 'block';
             } else if (r.type === 12) { // Inductor
                 resultPinout.innerHTML = buildInductorDiagram(r.pinA, r.pinB, r.value1 / 1000.0);
@@ -488,61 +628,163 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
-    
+
+    // Calculate standard 4-band EIA/IEC resistor color code
+    function getResistorColorBands(val_ohm) {
+        if (!val_ohm || val_ohm <= 0) return null;
+
+        const DIGIT_COLORS = [
+            { name: 'Black', hex: '#1e293b', border: '#475569' },  // 0
+            { name: 'Brown', hex: '#854d0e', border: '#a16207' },  // 1
+            { name: 'Red', hex: '#ef4444', border: '#f87171' },    // 2
+            { name: 'Orange', hex: '#f97316', border: '#fb923c' }, // 3
+            { name: 'Yellow', hex: '#eab308', border: '#facc15' }, // 4
+            { name: 'Green', hex: '#22c55e', border: '#4ade80' },  // 5
+            { name: 'Blue', hex: '#3b82f6', border: '#60a5fa' },   // 6
+            { name: 'Violet', hex: '#a855f7', border: '#c084fc' }, // 7
+            { name: 'Gray', hex: '#64748b', border: '#94a3b8' },   // 8
+            { name: 'White', hex: '#f8fafc', border: '#cbd5e1' }   // 9
+        ];
+
+        const MULT_COLORS = {
+            '-2': { name: 'Silver', hex: '#cbd5e1', border: '#e2e8f0' },
+            '-1': { name: 'Gold', hex: '#eab308', border: '#fde047' },
+            '0': DIGIT_COLORS[0],
+            '1': DIGIT_COLORS[1],
+            '2': DIGIT_COLORS[2],
+            '3': DIGIT_COLORS[3],
+            '4': DIGIT_COLORS[4],
+            '5': DIGIT_COLORS[5],
+            '6': DIGIT_COLORS[6],
+            '7': DIGIT_COLORS[7],
+            '8': DIGIT_COLORS[8],
+            '9': DIGIT_COLORS[9]
+        };
+
+        const TOLERANCE_BAND = { name: 'Gold', hex: '#eab308', border: '#fde047' };
+
+        let exp = Math.floor(Math.log10(val_ohm));
+        let norm = val_ohm / Math.pow(10, exp);
+        let sig2 = Math.round(norm * 10);
+        let multExp = exp - 1;
+        if (sig2 >= 100) {
+            sig2 = Math.round(sig2 / 10);
+            multExp += 1;
+        }
+        if (sig2 < 10) sig2 = 10;
+
+        let d1 = Math.floor(sig2 / 10);
+        let d2 = sig2 % 10;
+
+        let b1 = DIGIT_COLORS[d1] || DIGIT_COLORS[1];
+        let b2 = DIGIT_COLORS[d2] || DIGIT_COLORS[0];
+        let b3 = MULT_COLORS[multExp.toString()] || MULT_COLORS['0'];
+        let b4 = TOLERANCE_BAND;
+
+        return [b1, b2, b3, b4];
+    }
+
     // Build SVG schematic diagrams
     function buildResistorDiagram(r) {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
+        let rOffset = 0;
+        if (typeof window.Calibration !== 'undefined' && window.Calibration.compOffsetR) {
+            rOffset = window.Calibration.compOffsetR;
+        }
+        const r1_ohm = Math.max(0, r.value1 - rOffset) / 100.0;
+        const bands1 = getResistorColorBands(r1_ohm) || [
+            { name: 'Brown', hex: '#854d0e', border: '#a16207' },
+            { name: 'Black', hex: '#1e293b', border: '#475569' },
+            { name: 'Red', hex: '#ef4444', border: '#f87171' },
+            { name: 'Gold', hex: '#eab308', border: '#fde047' }
+        ];
+
         if (r.value2 > 0) {
-            // Dual Resistor schematic (3 probes)
-            return `<svg viewBox="0 0 220 100" class="comp-schematic">
-                <line x1="20" y1="50" x2="45" y2="50" stroke="#38bdf8" stroke-width="2"/>
-                <rect x="45" y="38" width="50" height="24" fill="rgba(56, 189, 248, 0.1)" stroke="#38bdf8" stroke-width="2" rx="3"/>
-                <line x1="95" y1="50" x2="125" y2="50" stroke="#38bdf8" stroke-width="2"/>
-                <rect x="125" y="38" width="50" height="24" fill="rgba(56, 189, 248, 0.1)" stroke="#38bdf8" stroke-width="2" rx="3"/>
-                <line x1="175" y1="50" x2="200" y2="50" stroke="#38bdf8" stroke-width="2"/>
-                <text x="5" y="25" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="start">${probes[r.pinA]}</text>
-                <text x="110" y="25" fill="#38bdf8" font-size="10" font-weight="bold" text-anchor="middle">${probes[r.pinB]}</text>
-                <text x="215" y="25" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="end">${probes[r.pinC]}</text>
-                <text x="70" y="80" fill="#f59e0b" font-size="10" font-weight="bold" text-anchor="middle">R1: ${formatResistance(r.value1)}</text>
-                <text x="150" y="80" fill="#10b981" font-size="10" font-weight="bold" text-anchor="middle">R2: ${formatResistance(r.value2)}</text>
+            const r2_ohm = Math.max(0, r.value2 - rOffset) / 100.0;
+            const bands2 = getResistorColorBands(r2_ohm) || bands1;
+
+            // Dual Resistor schematic (3 probes) with realistic color bands
+            return `<svg viewBox="0 0 280 115" class="comp-schematic">
+                <!-- Leads -->
+                <line x1="15" y1="48" x2="38" y2="48" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+                <line x1="118" y1="48" x2="162" y2="48" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+                <line x1="242" y1="48" x2="265" y2="48" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+                
+                <!-- R1 Body (Beige ceramic) -->
+                <rect x="38" y="34" width="80" height="28" fill="#e2d5c3" stroke="#a89f91" stroke-width="1.5" rx="4"/>
+                <rect x="36" y="32" width="8" height="32" fill="#d6c7b2" stroke="#a89f91" stroke-width="1" rx="2"/>
+                <rect x="112" y="32" width="8" height="32" fill="#d6c7b2" stroke="#a89f91" stroke-width="1" rx="2"/>
+                <!-- R1 Bands -->
+                <rect x="52" y="33" width="6" height="30" fill="${bands1[0].hex}" stroke="${bands1[0].border}" rx="1"/>
+                <rect x="66" y="34" width="6" height="28" fill="${bands1[1].hex}" stroke="${bands1[1].border}" rx="1"/>
+                <rect x="80" y="34" width="6" height="28" fill="${bands1[2].hex}" stroke="${bands1[2].border}" rx="1"/>
+                <rect x="96" y="33" width="6" height="30" fill="${bands1[3].hex}" stroke="${bands1[3].border}" rx="1"/>
+
+                <!-- R2 Body (Beige ceramic) -->
+                <rect x="162" y="34" width="80" height="28" fill="#e2d5c3" stroke="#a89f91" stroke-width="1.5" rx="4"/>
+                <rect x="160" y="32" width="8" height="32" fill="#d6c7b2" stroke="#a89f91" stroke-width="1" rx="2"/>
+                <rect x="236" y="32" width="8" height="32" fill="#d6c7b2" stroke="#a89f91" stroke-width="1" rx="2"/>
+                <!-- R2 Bands -->
+                <rect x="176" y="33" width="6" height="30" fill="${bands2[0].hex}" stroke="${bands2[0].border}" rx="1"/>
+                <rect x="190" y="34" width="6" height="28" fill="${bands2[1].hex}" stroke="${bands2[1].border}" rx="1"/>
+                <rect x="204" y="34" width="6" height="28" fill="${bands2[2].hex}" stroke="${bands2[2].border}" rx="1"/>
+                <rect x="220" y="33" width="6" height="30" fill="${bands2[3].hex}" stroke="${bands2[3].border}" rx="1"/>
+
+                <!-- Probe labels -->
+                <text x="5" y="20" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="start">${probes[r.pinA]}</text>
+                <text x="140" y="20" fill="#38bdf8" font-size="10" font-weight="bold" text-anchor="middle">${probes[r.pinB]}</text>
+                <text x="275" y="20" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="end">${probes[r.pinC]}</text>
+
+                <!-- Values & Color codes -->
+                <text x="78" y="78" fill="#f59e0b" font-size="11" font-weight="bold" text-anchor="middle">R1: ${formatResistance(r.value1)}</text>
+                <text x="78" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${bands1.map(b => b.name).join(' • ')}</text>
+                
+                <text x="202" y="78" fill="#10b981" font-size="11" font-weight="bold" text-anchor="middle">R2: ${formatResistance(r.value2)}</text>
+                <text x="202" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${bands2.map(b => b.name).join(' • ')}</text>
             </svg>`;
         } else {
-            // Single Resistor schematic
-            return `<svg viewBox="0 0 220 90" class="comp-schematic">
-                <!-- Left lead -->
-                <line x1="20" y1="45" x2="60" y2="45" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
-                <!-- Resistor body (IEC rectangle) -->
-                <rect x="60" y="30" width="100" height="30" fill="rgba(56, 189, 248, 0.1)" stroke="#38bdf8" stroke-width="2.5" rx="4"/>
-                <!-- Color bands decoration -->
-                <line x1="80" y1="30" x2="80" y2="60" stroke="#f59e0b" stroke-width="4"/>
-                <line x1="100" y1="30" x2="100" y2="60" stroke="#ef4444" stroke-width="4"/>
-                <line x1="120" y1="30" x2="120" y2="60" stroke="#10b981" stroke-width="4"/>
-                <line x1="140" y1="30" x2="140" y2="60" stroke="#a855f7" stroke-width="3"/>
-                <!-- Right lead -->
-                <line x1="160" y1="45" x2="200" y2="45" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+            // Single Resistor schematic with dynamic color bands
+            return `<svg viewBox="0 0 240 105" class="comp-schematic">
+                <!-- Metal leads -->
+                <line x1="15" y1="45" x2="65" y2="45" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>
+                <line x1="175" y1="45" x2="225" y2="45" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>
+
+                <!-- Resistor Body (Beige ceramic with end caps) -->
+                <rect x="65" y="28" width="110" height="34" fill="#e2d5c3" stroke="#a89f91" stroke-width="1.5" rx="6"/>
+                <rect x="62" y="25" width="12" height="40" fill="#d6c7b2" stroke="#a89f91" stroke-width="1.2" rx="3"/>
+                <rect x="166" y="25" width="12" height="40" fill="#d6c7b2" stroke="#a89f91" stroke-width="1.2" rx="3"/>
+
+                <!-- Dynamic Color bands -->
+                <rect x="83" y="27" width="8" height="36" fill="${bands1[0].hex}" stroke="${bands1[0].border}" rx="1"/>
+                <rect x="103" y="28" width="8" height="34" fill="${bands1[1].hex}" stroke="${bands1[1].border}" rx="1"/>
+                <rect x="123" y="28" width="8" height="34" fill="${bands1[2].hex}" stroke="${bands1[2].border}" rx="1"/>
+                <rect x="148" y="27" width="8" height="36" fill="${bands1[3].hex}" stroke="${bands1[3].border}" rx="1"/>
+
                 <!-- Pin labels -->
-                <text x="5" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="start">${probes[r.pinA]}</text>
-                <text x="215" y="20" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="end">${probes[r.pinB]}</text>
-                <text x="110" y="78" fill="#94a3b8" font-size="11" font-weight="600" text-anchor="middle">Resistor</text>
+                <text x="15" y="18" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="start">${probes[r.pinA]}</text>
+                <text x="225" y="18" fill="#f8fafc" font-size="11" font-weight="bold" text-anchor="end">${probes[r.pinB]}</text>
+                
+                <!-- Value and Color names legend -->
+                <text x="120" y="80" fill="#38bdf8" font-size="12" font-weight="bold" text-anchor="middle">${formatResistance(r.value1)}</text>
+                <text x="120" y="96" fill="#94a3b8" font-size="9.5" font-weight="600" text-anchor="middle">${bands1.map(b => b.name).join(' • ')}</text>
             </svg>`;
         }
     }
 
-    function buildCapacitorDiagram(pinA, pinB, pF) {
+    function buildCapacitorDiagram(pinA, pinB, pF, isPol = false) {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
         const leftPin = Math.min(pinA, pinB);
         const rightPin = Math.max(pinA, pinB);
-        
+
         let polaritySign = '';
-        // Consider >= 1uF as electrolytic
-        if (pF >= 1000000) {
+        if (isPol) {
             if (pinA === leftPin) {
                 polaritySign = '<text x="82" y="32" fill="#22c55e" font-size="14" font-weight="bold">+</text>';
             } else {
                 polaritySign = '<text x="131" y="32" fill="#22c55e" font-size="14" font-weight="bold">+</text>';
             }
         }
-        
+
         return `<svg viewBox="0 0 220 90" class="comp-schematic">
             <!-- Left lead -->
             <line x1="20" y1="45" x2="95" y2="45" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
@@ -580,14 +822,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
         // Determine probe ordering (left = min index, right = max index)
         const pointsRight = pinA < pinK;
-        
+
         const leftPin = Math.min(pinA, pinK);
         const rightPin = Math.max(pinA, pinK);
-        
+
         const leftIsAnode = (leftPin === pinA);
         const leftLabel = (leftIsAnode ? 'A: ' : 'K: ') + probes[leftPin];
         const rightLabel = (leftIsAnode ? 'K: ' : 'A: ') + probes[rightPin];
-        
+
         const leftColor = leftIsAnode ? '#22c55e' : '#ef4444';
         const rightColor = leftIsAnode ? '#ef4444' : '#22c55e';
 
@@ -631,8 +873,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <line x1="80" y1="102" x2="140" y2="130" stroke="#38bdf8" stroke-width="2.5"/>
             <line x1="140" y1="130" x2="200" y2="130" stroke="#38bdf8" stroke-width="2.5"/>
             <!-- Arrow -->
-            ${isNPN 
-                ? '<polygon points="122,122 140,130 128,112" fill="#38bdf8"/>' 
+            ${isNPN
+                ? '<polygon points="122,122 140,130 128,112" fill="#38bdf8"/>'
                 : '<polygon points="98,108 80,102 92,118" fill="#38bdf8"/>'}
             <!-- Pin labels -->
             <text x="20" y="65" fill="#38bdf8" font-size="11" font-weight="bold">Base (B)</text>
@@ -652,7 +894,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
         const chStr = isPch ? 'P-CH' : 'N-CH';
         const modeStr = isEnhancement ? 'ENH' : 'DEP';
-        
+
         return `<svg viewBox="0 0 220 180" class="comp-schematic">
             <!-- Circle boundary -->
             <circle cx="110" cy="80" r="55" fill="rgba(56, 189, 248, 0.05)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="1.5" stroke-dasharray="4,3"/>
@@ -662,7 +904,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <line x1="72" y1="45" x2="72" y2="115" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
             
             <!-- Channel Bars (segmented for Enhancement) -->
-            ${isEnhancement 
+            ${isEnhancement
                 ? '<line x1="80" y1="48" x2="80" y2="64" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/><line x1="80" y1="72" x2="80" y2="88" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/><line x1="80" y1="96" x2="80" y2="112" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>'
                 : '<line x1="80" y1="48" x2="80" y2="112" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>'
             }
@@ -682,8 +924,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <line x1="140" y1="80" x2="140" y2="104" stroke="#38bdf8" stroke-width="2.5"/>
             
             <!-- Substrate Arrow (N-Ch points IN towards channel, P-Ch points OUT) -->
-            ${!isPch 
-                ? '<polygon points="86,80 102,73 102,87" fill="#38bdf8"/>' 
+            ${!isPch
+                ? '<polygon points="86,80 102,73 102,87" fill="#38bdf8"/>'
                 : '<polygon points="106,80 90,73 90,87" fill="#38bdf8"/>'}
             
             <!-- Pin labels -->

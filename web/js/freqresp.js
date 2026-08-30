@@ -1454,7 +1454,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             let detailsHtml = '';
                             if (calModeNum === FR_MODE_SINE) {
                                 detailsHtml = `
-                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Universal Sine FR Calibration Complete!</div>
+                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Sine FR Calibration Complete!</div>
                                     <div>• Mode: <strong>Sine (10 Hz – 1.00 MHz)</strong></div>
                                     <div>• Generator Output: <strong>PB5 (Sigma-Delta DAC)</strong></div>
                                     <div>• Input: <strong>PB0 (ADC Goertzel Lock-in)</strong></div>
@@ -1463,7 +1463,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 `;
                             } else if (calModeNum === FR_MODE_DIRECT) {
                                 detailsHtml = `
-                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Universal Direct FR Calibration Complete!</div>
+                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Direct FR Calibration Complete!</div>
                                     <div>• Mode: <strong>Direct Meander (10 Hz – 1.00 MHz)</strong></div>
                                     <div>• Generator Output: <strong>PA8 (TIM1_CH1 Meander 50%)</strong></div>
                                     <div>• Input: <strong>PB0 (ADC Goertzel)</strong></div>
@@ -1472,7 +1472,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 `;
                             } else {
                                 detailsHtml = `
-                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Universal Diode FR Calibration Complete!</div>
+                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Diode FR Calibration Complete!</div>
                                     <div>• Mode: <strong>Diode (10 Hz – 42.00 MHz)</strong></div>
                                     <div>• Generator Output: <strong>PA8 (TIM1_CH1 Meander 50%)</strong></div>
                                     <div>• Input: <strong>PB0 (ADC via Diode Detector)</strong></div>
@@ -1485,7 +1485,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             resultsEl.style.display = 'block';
                         }
 
-                        btnNext.innerText = 'Done ✔';
+                        btnNext.innerText = 'Done';
                         btnNext.disabled = false;
                         setStatus('Calibration done. Ready to sweep.', '');
                         render();
@@ -1656,10 +1656,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const cfgShowDebugLog = document.getElementById('cfgShowDebugLog');
     if (frDebugLogCard && cfgShowDebugLog) {
         const syncDebugLogCard = () => {
-            frDebugLogCard.style.display = cfgShowDebugLog.checked ? '' : 'none';
+            const enabled = cfgShowDebugLog.checked;
+            localStorage.setItem('microtester_show_debug_log', enabled ? 'true' : 'false');
+            frDebugLogCard.style.display = enabled ? '' : 'none';
+            const compDebugLogCard = document.getElementById('compDebugLogCard');
+            if (compDebugLogCard) {
+                compDebugLogCard.style.display = enabled ? 'block' : 'none';
+            }
         };
-        cfgShowDebugLog.addEventListener('change', syncDebugLogCard);
+        cfgShowDebugLog.checked = localStorage.getItem('microtester_show_debug_log') === 'true';
         syncDebugLogCard();
+        cfgShowDebugLog.addEventListener('change', syncDebugLogCard);
     }
 
     // Initialize calibration and render

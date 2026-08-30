@@ -29,6 +29,7 @@
 // Device to Host Packets
 #define PKT_VOLTMETER_DATA     0x10
 #define PKT_OSCILLOSCOPE_DATA  0x12
+#define PKT_SIGMA_DELTA_READY  0x35  // Reply when Sigma-Delta DAC bitstream is loaded and playback started
 #define PKT_COMP_RESULT        0x50  // Component test result
 #define PKT_FR_DATA            0x60  // FR point reply: [freq_b0..3(4)] [mode(1)] [value_b0..3(4)]
 

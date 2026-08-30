@@ -7,6 +7,7 @@ window.Calibration = {
     gainCorrection: [1.0, 1.0, 1.0, 1.0, 1.0], // fine-tune divider ratio (1.0 = nominal)
     _calibrationBusy: false,                   // mutex: blocks volt/osc while calibrating
     compOffsetR: 0, // Component Tester Short resistance offset (milliohms)
+    compOffsetESR: 0, // Component Tester 1 kHz ESR Zero offset (milliohms)
     compRL: [680, 680, 680], // Component Tester pull-down resistances for TP1, TP2, TP3
     compRH: [470000, 470000, 470000], // Component Tester 470k resistances for TP1, TP2, TP3
 
@@ -67,6 +68,11 @@ window.Calibration = {
             if (savedCompR) {
                 const parsedR = parseInt(savedCompR, 10);
                 if (!isNaN(parsedR) && parsedR >= 0 && parsedR <= 5000) this.compOffsetR = parsedR;
+            }
+            const savedCompESR = localStorage.getItem('microtester_comp_offset_esr');
+            if (savedCompESR) {
+                const parsedESR = parseInt(savedCompESR, 10);
+                if (!isNaN(parsedESR) && parsedESR >= 0 && parsedESR <= 5000) this.compOffsetESR = parsedESR;
             }
             const savedRL = localStorage.getItem('microtester_comp_RL');
             if (savedRL) {
@@ -133,42 +139,39 @@ window.Calibration = {
                                     const RL1 = (val1 >> 16) & 0xFFFF;
                                     const RL2 = val2 & 0xFFFF;
                                     const wireR = (val2 >> 16) & 0xFFFF;
+                                    const esrZero = (payload.length >= 18) ? (payload[16] | (payload[17] << 8)) : wireR;
                                     
                                     const RH1 = val3 & 0xFFFF;
                                     const RH2 = (val3 >> 16) & 0xFFFF;
                                     
                                     window.Calibration.compOffsetR = wireR;
+                                    window.Calibration.compOffsetESR = esrZero;
                                     window.Calibration.compRL = [RL0 / 10, RL1 / 10, RL2 / 10];
                                     window.Calibration.compRH = [470000, RH1 * 10, RH2 * 10];
                                     
                                     localStorage.setItem('microtester_comp_offset_r', wireR.toString());
+                                    localStorage.setItem('microtester_comp_offset_esr', esrZero.toString());
                                     localStorage.setItem('microtester_comp_RL', JSON.stringify(window.Calibration.compRL));
                                     localStorage.setItem('microtester_comp_RH', JSON.stringify(window.Calibration.compRH));
                                     window.dispatchEvent(new Event('comp-calib-updated'));
                                     
-                                    if (document.getElementById('btnCompCalibTab')) {
-                                        document.getElementById('btnCompCalibTab').innerHTML = '🎯 Calibrate Probes (Short)';
-                                        document.getElementById('btnCompCalibTab').disabled = false;
+                                    if (typeof this._finishCompWizard === 'function') {
+                                        this._finishCompWizard(wireR, esrZero, window.Calibration.compRL, window.Calibration.compRH, true);
                                     }
-                                    
-                                    alert(`Calibration successful!\nWire resistance: ${(wireR/100).toFixed(2)} Ω\nProbe Asymmetry (RL): [${(RL0/10).toFixed(1)}, ${(RL1/10).toFixed(1)}, ${(RL2/10).toFixed(1)}] Ω\nProbe Asymmetry (RH): [470.0, ${(RH1/100).toFixed(1)}, ${(RH2/100).toFixed(1)}] kΩ`);
                                 } else {
                                     const val1 = payload[4] | (payload[5] << 8) | (payload[6] << 16) | (payload[7] << 24);
                                     window.Calibration.compOffsetR = val1;
                                     localStorage.setItem('microtester_comp_offset_r', val1.toString());
                                     window.dispatchEvent(new Event('comp-calib-updated'));
-                                    if (document.getElementById('btnCompCalibTab')) {
-                                        document.getElementById('btnCompCalibTab').innerHTML = '🎯 Calibrate Probes (Short)';
-                                        document.getElementById('btnCompCalibTab').disabled = false;
+                                    
+                                    if (typeof this._finishCompWizard === 'function') {
+                                        this._finishCompWizard(val1, val1, [680, 680, 680], [470000, 470000, 470000], false);
                                     }
-                                    alert("Calibration successful! (2-way short). Wire resistance: " + (val1/100).toFixed(2) + " ohms. (Short ALL 3 probes for full calibration!)");
                                 }
                             } else {
-                                if (document.getElementById('btnCompCalibTab')) {
-                                    document.getElementById('btnCompCalibTab').innerHTML = '🎯 Calibrate Probes (Short)';
-                                    document.getElementById('btnCompCalibTab').disabled = false;
+                                if (typeof this._failCompWizard === 'function') {
+                                    this._failCompWizard("Please make sure all 3 probes (TP1, TP2, TP3) are firmly shorted together!");
                                 }
-                                alert("Calibration failed. Please make sure all 3 probes (TP1, TP2, TP3) are firmly shorted together!");
                             }
                         }
                     }
@@ -227,8 +230,8 @@ window.Calibration = {
         const rl = (this.compRL || [680, 680, 680]).map(v => Math.round((v || 680) * 10)); // into 0.1 ohm units
         const rh = (this.compRH || [470000, 470000, 470000]).map(v => Math.round(v || 470000)); // in 1 ohm units
         // ESR zero: loop switch+lead resistance from probe-short calibration.
-        // compOffsetR is stored in 0.01 ohm units - same unit used by firmware
-        const esrZeroX100 = Math.min(65000, Math.max(0, Math.round(this.compOffsetR || 0)));
+        // compOffsetESR / compOffsetR is stored in 0.01 ohm units - same unit used by firmware
+        const esrZeroX100 = Math.min(65000, Math.max(0, Math.round(this.compOffsetESR || this.compOffsetR || 0)));
 
         const buf = new Uint8Array(22);
         buf[0] = vddaMv & 0xFF;
@@ -333,7 +336,7 @@ window.Calibration = {
         if (wasOscRunning) microTester.sendCommand(0x13); // CMD_OSC_STOP
         
         buttonElement.disabled = true;
-        buttonElement.innerText = "⏳ Calibrating...";
+        buttonElement.innerText = "Calibrating...";
         
         // Oversample 6 = 64x averaging
         const biasMode = biasEnabled ? 1 : 0;
@@ -373,8 +376,8 @@ window.Calibration = {
                 alert("Calibration failed: no data received.");
             }
             
-            if (biasEnabled) buttonElement.innerHTML = '🎯 Calibrate Bias';
-            else buttonElement.innerHTML = '🎯 Calibrate Zero';
+            if (biasEnabled) buttonElement.innerHTML = 'Calibrate Bias';
+            else buttonElement.innerHTML = 'Calibrate Zero';
             buttonElement.disabled = false;
             
             if (wasVoltRunning) {
@@ -403,7 +406,7 @@ window.Calibration = {
                 // Update UI progress occasionally
                 if (count % 2000 < 50) {
                     const pct = Math.floor((count / TARGET_SAMPLES) * 100);
-                    buttonElement.innerText = `⏳ Calibrating (${pct}%)`;
+                    buttonElement.innerText = `Calibrating (${pct}%)`;
                 }
 
                 if (count >= TARGET_SAMPLES) {
@@ -482,6 +485,8 @@ window.Calibration = {
         const modal = document.getElementById('modalUnifiedCalib');
         const chLabel = document.getElementById('calibModalChLabel');
         const stepDesc = document.getElementById('calibModalStepDesc');
+        const oversampleRow = document.getElementById('calibModalOversampleRow');
+        const oversampleSelect = document.getElementById('calibProbeOversampleSelect');
         const progContainer = document.getElementById('calibModalProgressContainer');
         const statusText = document.getElementById('calibModalStatusText');
         const progressBar = document.getElementById('calibProgressBar');
@@ -502,12 +507,21 @@ window.Calibration = {
         const chName = `CH${channel + 1} (PA${channel + 1})`;
         if (chLabel) chLabel.innerText = chName;
 
+        if (oversampleSelect) {
+            const saved = localStorage.getItem('microtester_probe_calib_oversample');
+            if (saved) oversampleSelect.value = saved;
+            oversampleSelect.onchange = () => {
+                localStorage.setItem('microtester_probe_calib_oversample', oversampleSelect.value);
+            };
+        }
+
         const resetModalState = () => {
             currentStep = 1;
             if (stepDesc) {
                 stepDesc.style.display = 'block';
                 stepDesc.innerHTML = `Step 1 of 3: Please short probe <strong style="color: #38bdf8;">${chName}</strong> firmly to Ground (GND).`;
             }
+            if (oversampleRow) oversampleRow.style.display = 'flex';
             if (progContainer) progContainer.style.display = 'none';
             if (resultsEl) resultsEl.style.display = 'none';
             if (btnNext) {
@@ -561,19 +575,22 @@ window.Calibration = {
         btnClose.onclick = handleCancel;
 
         btnNext.onclick = async () => {
+            const targetSamples = parseInt(oversampleSelect?.value || '16384', 10);
+            if (oversampleRow) oversampleRow.style.display = 'none';
+
             if (currentStep === 1) {
                 btnNext.disabled = true;
                 btnCancel.disabled = true;
                 if (progContainer) progContainer.style.display = 'block';
 
                 try {
-                    if (statusText) statusText.innerText = "1/3: Measuring Zero Offset (Bias OFF)...";
-                    rawOffShort = await this._sampleRawPromise(channel, false, 16384, pct => {
+                    if (statusText) statusText.innerText = `1/3: Measuring Zero Offset (Bias OFF, ${targetSamples}x)...`;
+                    rawOffShort = await this._sampleRawPromise(channel, false, targetSamples, pct => {
                         if (progressBar) progressBar.style.width = (pct * 0.5) + '%';
                     });
 
-                    if (statusText) statusText.innerText = "1/3: Measuring Short Offset (Bias ON)...";
-                    rawOnShort = await this._sampleRawPromise(channel, true, 16384, pct => {
+                    if (statusText) statusText.innerText = `1/3: Measuring Short Offset (Bias ON, ${targetSamples}x)...`;
+                    rawOnShort = await this._sampleRawPromise(channel, true, targetSamples, pct => {
                         if (progressBar) progressBar.style.width = (50 + pct * 0.5) + '%';
                     });
 
@@ -594,8 +611,8 @@ window.Calibration = {
                 if (progContainer) progContainer.style.display = 'block';
 
                 try {
-                    if (statusText) statusText.innerText = "2/3: Measuring Open Circuit (Bias ON)...";
-                    rawOnOpen = await this._sampleRawPromise(channel, true, 16384, pct => {
+                    if (statusText) statusText.innerText = `2/3: Measuring Open Circuit (Bias ON, ${targetSamples}x)...`;
+                    rawOnOpen = await this._sampleRawPromise(channel, true, targetSamples, pct => {
                         if (progressBar) progressBar.style.width = pct + '%';
                     });
 
@@ -727,17 +744,176 @@ window.Calibration = {
         if (stepDesc) stepDesc.style.display = 'none';
         if (resultsEl) {
             resultsEl.innerHTML = `
-                <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">✅ Calibration Successful for ${chName}!</div>
+                <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Calibration Successful for ${chName}!</div>
                 ${probeSummary}
                 ${zeroNote}
             `;
             resultsEl.style.display = 'block';
         }
         if (btnNext) {
-            btnNext.innerText = 'Done ✔';
+            btnNext.innerText = 'Done';
             btnNext.disabled = false;
         }
         if (btnCancel) btnCancel.disabled = false;
+    },
+
+    startCompWizard: function() {
+        if (typeof microTester === 'undefined' || !microTester.device) {
+            return alert("Please connect the device first.");
+        }
+        if (this._calibrationBusy) return;
+
+        const modal = document.getElementById('modalCompCalib');
+        const stepDesc = document.getElementById('compModalStepDesc');
+        const oversampleRow = document.getElementById('compModalOversampleRow');
+        const progContainer = document.getElementById('compModalProgressContainer');
+        const statusText = document.getElementById('compModalStatusText');
+        const resultsEl = document.getElementById('compModalResults');
+        const btnStart = document.getElementById('btnCompModalNext');
+        const btnCancel = document.getElementById('btnCompModalCancel');
+        const btnClose = document.getElementById('btnCompModalClose');
+        const oversampleSelect = document.getElementById('compCalibOversampleSelect');
+
+        if (!modal) return;
+
+        let isDone = false;
+
+        const resetModalState = () => {
+            isDone = false;
+            if (stepDesc) {
+                stepDesc.style.display = 'block';
+                stepDesc.innerHTML = `Step 1 of 1: Please short all three measurement probes (<strong style="color: #38bdf8;">TP1, TP2, TP3</strong>) firmly together.`;
+            }
+            if (oversampleRow) oversampleRow.style.display = 'flex';
+            if (progContainer) progContainer.style.display = 'none';
+            if (resultsEl) resultsEl.style.display = 'none';
+            if (btnStart) {
+                btnStart.style.display = 'inline-block';
+                btnStart.innerText = 'Start Calibration ▶';
+                btnStart.disabled = false;
+            }
+            if (btnCancel) btnCancel.disabled = false;
+            if (btnClose) btnClose.disabled = false;
+        };
+
+        const closeModal = () => {
+            if (this._isCompCalibrating) {
+                microTester.sendCommand(0x51 /* CMD_COMP_STOP */, new Uint8Array(0));
+            }
+            modal.classList.remove('active');
+            this._calibrationBusy = false;
+            this._isCompCalibrating = false;
+        };
+
+        if (oversampleSelect) {
+            const saved = localStorage.getItem('microtester_comp_calib_oversample');
+            if (saved) oversampleSelect.value = saved;
+            oversampleSelect.onchange = () => {
+                localStorage.setItem('microtester_comp_calib_oversample', oversampleSelect.value);
+            };
+        }
+
+        resetModalState();
+        modal.classList.add('active');
+
+        if (btnCancel) btnCancel.onclick = closeModal;
+        if (btnClose) btnClose.onclick = closeModal;
+
+        if (btnStart) {
+            btnStart.onclick = () => {
+                if (isDone) {
+                    closeModal();
+                    return;
+                }
+
+                this._calibrationBusy = true;
+                this._isCompCalibrating = true;
+
+                const oversample = parseInt(oversampleSelect?.value || '256', 10);
+                const is65k = (oversample >= 65536);
+                const ovVal = is65k ? 0 : oversample;
+                const payload = new Uint8Array([0, ovVal & 0xFF, (ovVal >> 8) & 0xFF]);
+
+                if (oversampleRow) oversampleRow.style.display = 'none';
+                if (stepDesc) stepDesc.innerHTML = `<span style="color: #38bdf8;">Calibration in progress... Please keep TP1, TP2, TP3 shorted.</span>`;
+                if (progContainer) progContainer.style.display = 'block';
+                if (statusText) statusText.innerText = `Sampling hardware (${oversample}x oversampling)...`;
+                btnStart.disabled = true;
+                if (btnCancel) btnCancel.disabled = false;
+
+                microTester.sendCommand(0x50, payload);
+            };
+        }
+    },
+
+    _finishCompWizard: function(wireR, esrZero, RL, RH, isFull) {
+        const stepDesc = document.getElementById('compModalStepDesc');
+        const oversampleRow = document.getElementById('compModalOversampleRow');
+        const progContainer = document.getElementById('compModalProgressContainer');
+        const resultsEl = document.getElementById('compModalResults');
+        const btnStart = document.getElementById('btnCompModalNext');
+        const btnCancel = document.getElementById('btnCompModalCancel');
+
+        setTimeout(() => {
+            if (progContainer) progContainer.style.display = 'none';
+            if (stepDesc) stepDesc.style.display = 'none';
+            if (oversampleRow) oversampleRow.style.display = 'none';
+            if (resultsEl) {
+                if (isFull) {
+                    resultsEl.innerHTML = `
+                        <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px; font-size: 13px;">Calibration Successful!</div>
+                        <div style="color: #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
+                            <div>• Wire R_offset: <strong style="color: #38bdf8;">${(wireR/100).toFixed(2)} Ω</strong></div>
+                            <div>• ESR 1kHz Offset: <strong style="color: #38bdf8;">${(esrZero/100).toFixed(2)} Ω</strong></div>
+                            <div>• Probe Asymmetry (RL 680Ω): <strong style="color: #f8fafc;">[${RL[0].toFixed(1)}, ${RL[1].toFixed(1)}, ${RL[2].toFixed(1)}] Ω</strong></div>
+                            <div>• Probe Asymmetry (RH 470kΩ): <strong style="color: #f8fafc;">[${(RH[0]/1000).toFixed(1)}, ${(RH[1]/1000).toFixed(1)}, ${(RH[2]/1000).toFixed(1)}] kΩ</strong></div>
+                        </div>
+                    `;
+                } else {
+                    resultsEl.innerHTML = `
+                        <div style="color: #f59e0b; font-weight: bold; margin-bottom: 8px; font-size: 13px;">2-Way Short Calibrated</div>
+                        <div style="color: #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
+                            <div>• Wire R_offset: <strong style="color: #38bdf8;">${(wireR/100).toFixed(2)} Ω</strong></div>
+                            <div style="color: #94a3b8; font-size: 11px; margin-top: 4px;">Short ALL 3 probes (TP1, TP2, TP3) for complete divider calibration!</div>
+                        </div>
+                    `;
+                }
+                resultsEl.style.display = 'block';
+            }
+            if (btnStart) {
+                btnStart.innerText = 'Done';
+                btnStart.disabled = false;
+                btnStart.onclick = () => {
+                    const modal = document.getElementById('modalCompCalib');
+                    if (modal) modal.classList.remove('active');
+                    this._calibrationBusy = false;
+                };
+            }
+            if (btnCancel) btnCancel.disabled = false;
+            this._calibrationBusy = false;
+        }, 50);
+    },
+
+    _failCompWizard: function(errMsg) {
+        const progContainer = document.getElementById('compModalProgressContainer');
+        const resultsEl = document.getElementById('compModalResults');
+        const btnStart = document.getElementById('btnCompModalNext');
+        const btnCancel = document.getElementById('btnCompModalCancel');
+
+        if (progContainer) progContainer.style.display = 'none';
+        if (resultsEl) {
+            resultsEl.innerHTML = `
+                <div style="color: #ef4444; font-weight: bold; margin-bottom: 4px; font-size: 13px;">Calibration Failed</div>
+                <div style="color: #cbd5e1; font-size: 12px;">${errMsg || 'Please make sure all 3 probes are firmly shorted together!'}</div>
+            `;
+            resultsEl.style.display = 'block';
+        }
+        if (btnStart) {
+            btnStart.innerText = 'Retry';
+            btnStart.disabled = false;
+        }
+        if (btnCancel) btnCancel.disabled = false;
+        this._calibrationBusy = false;
     }
 };
 
@@ -831,6 +1007,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnCompCalibTab = document.getElementById('btnCompCalibTab');
     const compCalibBadge = document.getElementById('compCalibBadge');
     const compCalibVal = document.getElementById('compCalibVal');
+    const compCalibESR = document.getElementById('compCalibESR');
     const compCalibRL = document.getElementById('compCalibRL');
     const compCalibRH = document.getElementById('compCalibRH');
     const btnCompCalibReset = document.getElementById('btnCompCalibReset');
@@ -840,7 +1017,8 @@ window.addEventListener('DOMContentLoaded', () => {
         
         let show = false;
         const offset = window.Calibration.compOffsetR || 0;
-        if (offset > 0) show = true;
+        const esrOffset = window.Calibration.compOffsetESR || 0;
+        if (offset > 0 || esrOffset > 0) show = true;
         
         const RL = window.Calibration.compRL || [680, 680, 680];
         if (RL[0] !== 680 || RL[1] !== 680 || RL[2] !== 680) show = true;
@@ -849,6 +1027,7 @@ window.addEventListener('DOMContentLoaded', () => {
         
         if (show) {
             compCalibVal.innerText = (offset / 100).toFixed(2) + ' Ω';
+            if (compCalibESR) compCalibESR.innerText = (esrOffset / 100).toFixed(2) + ' Ω';
             if (compCalibRL) compCalibRL.innerText = `[${RL[0].toFixed(1)}, ${RL[1].toFixed(1)}, ${RL[2].toFixed(1)}]`;
             if (compCalibRH) compCalibRH.innerText = `[${(RH[0]/1000).toFixed(1)}, ${(RH[1]/1000).toFixed(1)}, ${(RH[2]/1000).toFixed(1)}]`;
             compCalibBadge.style.display = 'inline-flex';
@@ -859,33 +1038,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (btnCompCalibTab) {
         btnCompCalibTab.addEventListener('click', () => {
-            window.Calibration._isCompCalibrating = true;
-            if (typeof microTester !== 'undefined' && microTester.device) {
-                btnCompCalibTab.innerHTML = '⏳ Calibrating... (Wait ~30s)';
-                btnCompCalibTab.disabled = true;
-                microTester.sendCommand(0x50); // CMD_COMP_TEST
-                
-                // Fallback timeout in case device is disconnected or fails to respond
-                setTimeout(() => {
-                    if (window.Calibration._isCompCalibrating) {
-                        window.Calibration._isCompCalibrating = false;
-                        btnCompCalibTab.innerHTML = '🎯 Calibrate Probes (Short)';
-                        btnCompCalibTab.disabled = false;
-                        alert("Calibration timed out. Device did not respond.");
-                    }
-                }, 45000);
-            } else {
-                alert("Please connect the device first.");
-            }
+            window.Calibration.startCompWizard();
         });
     }
 
     if (btnCompCalibReset) {
         btnCompCalibReset.addEventListener('click', () => {
             window.Calibration.compOffsetR = 0;
+            window.Calibration.compOffsetESR = 0;
             window.Calibration.compRL = [680, 680, 680];
             window.Calibration.compRH = [470000, 470000, 470000];
             localStorage.setItem('microtester_comp_offset_r', '0');
+            localStorage.setItem('microtester_comp_offset_esr', '0');
             localStorage.setItem('microtester_comp_RL', JSON.stringify(window.Calibration.compRL));
             localStorage.setItem('microtester_comp_RH', JSON.stringify(window.Calibration.compRH));
             updateCompBadge();

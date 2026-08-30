@@ -387,11 +387,16 @@
 
                 <div class="nav-divider"></div>
 
-                <a href="https://eternal-entropia.github.io/hydrafw-port-stm32f401/start.html" target="_blank" rel="noopener noreferrer" class="nav-item" title="Programmer + Logic Analyzer">
+                <a href="https://eternal-entropia.github.io/hydrafw-port-stm32f401/start.html" target="_blank"
+                    rel="noopener noreferrer" class="nav-item" title="Programmer + Logic Analyzer">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-                            <text x="12" y="9.5" fill="currentColor" font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="10.5" font-weight="800" text-anchor="middle" letter-spacing="0.5">101</text>
-                            <text x="12" y="21" fill="currentColor" font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="10.5" font-weight="800" text-anchor="middle" letter-spacing="0.5">010</text>
+                            <text x="12" y="9.5" fill="currentColor"
+                                font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="10.5"
+                                font-weight="800" text-anchor="middle" letter-spacing="0.5">101</text>
+                            <text x="12" y="21" fill="currentColor"
+                                font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="10.5"
+                                font-weight="800" text-anchor="middle" letter-spacing="0.5">010</text>
                         </svg>
                     </span>
                     <span>Programmer + Logic Analyzer</span>
@@ -415,7 +420,7 @@
 
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Release v1.1
+                    MicroTester Release v1.2
                 </div>
             </div>
         </aside>
@@ -792,7 +797,7 @@
                     <!-- Toolbar -->
                     <div class="card"
                         style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
-                        <div style="display: flex; gap: 12px; align-items: center;">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                             <button class="btn btn-success btn-sm" id="btnCompTest" disabled>
                                 Test Component
                             </button>
@@ -943,6 +948,31 @@
                         <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
                             Always ensure all capacitors are fully discharged before connecting them to probe pins (TP1,
                             TP2, TP3) to protect your microcontroller from high voltage damage.
+                        </div>
+                    </div>
+
+                    <!-- Component Tester Debug Log Console -->
+                    <div class="card" id="compDebugLogCard"
+                        style="display: none; margin-top: 16px; padding: 14px 18px; background: rgba(10, 15, 30, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-weight: 700; color: #38bdf8; font-size: 13px;">Component Tester Debug
+                                    Log</span>
+                                <span class="text-xs text-muted" id="compDebugLogCount"
+                                    style="font-family: var(--font-mono); color: #94a3b8;">0 events</span>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-outline btn-sm" id="btnCompDebugClear"
+                                    style="padding: 2px 8px; font-size: 11px;">Clear</button>
+                                <button class="btn btn-outline btn-sm" id="btnCompDebugCopy"
+                                    style="padding: 2px 8px; font-size: 11px;">Copy</button>
+                            </div>
+                        </div>
+                        <div id="compDebugLogContent"
+                            style="max-height: 220px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.5; color: #cbd5e1; background: rgba(0, 0, 0, 0.45); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05); user-select: text;">
+                            <div style="color: #64748b; font-style: italic;">Debug log initialized. Ready for test
+                                events...</div>
                         </div>
                     </div>
                 </div>
@@ -1508,16 +1538,17 @@
                                 </h4>
                                 <p class="text-sm text-muted" style="margin-bottom: 16px; font-size: 12px;">
                                     Short all three measurement probes (TP1, TP2, TP3) together and click Calibrate.
-                                    This measures the resistance of your wires (Zero Resistance offset) to improve
-                                    measurement accuracy for small resistors.
+                                    This measures wire resistance, 1 kHz ESR offset, and resistor dividers.
                                 </p>
                                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                                    <button class="btn btn-primary btn-sm" id="btnCompCalibTab">
-                                        Calibrate Probes (Short)
+                                    <button class="btn btn-primary btn-sm" id="btnCompCalibTab"
+                                        style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.5);">
+                                        Calibrate
                                     </button>
                                     <span id="compCalibBadge" class="status-badge"
                                         style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 12px; border-radius: 6px; display: none; flex-direction: column; gap: 4px; position: relative; padding-right: 24px;">
                                         <div>Wire R_offset: <span id="compCalibVal">0.00 Ω</span></div>
+                                        <div>ESR 1kHz Offset: <span id="compCalibESR">0.00 Ω</span></div>
                                         <div
                                             style="border-top: 1px solid rgba(56,189,248,0.2); padding-top: 4px; display: flex; flex-direction: column; gap: 2px;">
                                             <div>RL (680Ω): <span id="compCalibRL">680.0, 680.0, 680.0</span> Ω</div>
@@ -1676,7 +1707,7 @@
                         </div>
 
                         <div style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-                            MicroTester Release v1.1
+                            MicroTester Release v1.2
                         </div>
 
                         <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">
@@ -1689,17 +1720,6 @@
                                 <label>Show Fc Marker (Bode Plot)</label>
                                 <label class="st-toggle">
                                     <input type="checkbox" id="cfgFrShowFc">
-                                    <span class="st-track">
-                                        <span class="st-label st-on">ON</span>
-                                        <span class="st-label st-off">OFF</span>
-                                        <span class="st-thumb"></span>
-                                    </span>
-                                </label>
-                            </div>
-                            <div class="config-field" style="text-align: left;">
-                                <label>Show Debug Log (Frequency Response)</label>
-                                <label class="st-toggle">
-                                    <input type="checkbox" id="cfgShowDebugLog">
                                     <span class="st-track">
                                         <span class="st-label st-on">ON</span>
                                         <span class="st-label st-off">OFF</span>
@@ -1734,6 +1754,17 @@
                                     style="width: 140px; font-size: 13px;"
                                     title="Frequency in Hz used on the PC to calculate capacitive reactance Xc = 1/(2*pi*f*C) and inductive reactance XL = 2*pi*f*L">
                             </div>
+                            <div class="config-field" style="text-align: left;">
+                                <label>Show Debug Logs (Component Tester &amp; Frequency Response)</label>
+                                <label class="st-toggle">
+                                    <input type="checkbox" id="cfgShowDebugLog">
+                                    <span class="st-track">
+                                        <span class="st-label st-on">ON</span>
+                                        <span class="st-label st-off">OFF</span>
+                                        <span class="st-thumb"></span>
+                                    </span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1754,6 +1785,19 @@
                                 style="font-size: 13px; color: #cbd5e1; line-height: 1.6; margin-bottom: 16px;">
                                 Step 1 of 2: Please short probe <strong id="calibModalChLabel"
                                     style="color: #38bdf8;">CH1</strong> firmly to Ground (GND).
+                            </div>
+                            <div id="calibModalOversampleRow"
+                                style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+                                <span style="font-size: 12px; color: #94a3b8;">Oversampling:</span>
+                                <select class="form-control" id="calibProbeOversampleSelect"
+                                    style="width: 110px; font-size: 12px;">
+                                    <option value="64">64x</option>
+                                    <option value="256">256x</option>
+                                    <option value="1024">1024x</option>
+                                    <option value="4096">4096x</option>
+                                    <option value="16384" selected>16384x</option>
+                                    <option value="65536">65536x</option>
+                                </select>
                             </div>
                             <div id="calibModalProgressContainer" style="display: none; margin-bottom: 16px;">
                                 <div style="font-size: 12px; color: #38bdf8; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace;"
@@ -1851,12 +1895,57 @@
                     </div>
                 </div>
 
+                <!-- Component Tester Calibration Wizard Modal -->
+                <div class="modal-overlay" id="modalCompCalib">
+                    <div class="modal"
+                        style="width: 520px; background: #0f172a; border: 1px solid #1e293b; color: #f8fafc;">
+                        <div class="modal-header" style="border-bottom: 1px solid #1e293b;">
+                            <h3 style="margin: 0; color: #38bdf8; font-size: 16px; display: flex; align-items: center; gap: 8px;"
+                                id="compModalTitle">
+                                Component Tester Calibration Wizard
+                            </h3>
+                            <button class="modal-close" id="btnCompModalClose" style="color: #94a3b8;">&times;</button>
+                        </div>
+                        <div class="modal-body" style="padding: 12px 0;">
+                            <div id="compModalStepDesc"
+                                style="font-size: 13px; color: #cbd5e1; line-height: 1.6; margin-bottom: 16px;">
+                                Step 1 of 1: Please short all three measurement probes (<strong style="color: #38bdf8;">TP1, TP2, TP3</strong>) firmly together.
+                            </div>
+                            <div id="compModalOversampleRow"
+                                style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+                                <span style="font-size: 12px; color: #94a3b8;">Oversampling:</span>
+                                <select class="form-control" id="compCalibOversampleSelect"
+                                    style="width: 110px; font-size: 12px;">
+                                    <option value="64">64x</option>
+                                    <option value="256" selected>256x</option>
+                                    <option value="1024">1024x</option>
+                                    <option value="4096">4096x</option>
+                                    <option value="16384">16384x</option>
+                                    <option value="65536">65536x</option>
+                                </select>
+                            </div>
+                            <div id="compModalProgressContainer" style="display: none; margin-bottom: 16px;">
+                                <div style="font-size: 13px; color: #38bdf8; font-family: 'JetBrains Mono', monospace;"
+                                    id="compModalStatusText">Sampling hardware...</div>
+                            </div>
+                            <div id="compModalResults"
+                                style="display: none; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; margin-bottom: 16px;">
+                            </div>
+                        </div>
+                        <div class="modal-footer"
+                            style="display: flex; justify-content: flex-end; gap: 12px; padding-top: 12px; border-top: 1px solid #1e293b;">
+                            <button class="btn btn-outline btn-sm" id="btnCompModalCancel">Cancel</button>
+                            <button class="btn btn-success btn-sm" id="btnCompModalNext">Start Calibration ▶</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Disclaimer Modal -->
                 <div class="modal-overlay" id="modalDisclaimer">
                     <div class="modal"
                         style="width: 520px; background: #0f172a; border: 1px solid #1e293b; color: #f8fafc;">
                         <div class="modal-header" style="border-bottom: 1px solid #1e293b;">
-                            <h3 style="margin: 0; color: #f59e0b; font-size: 16px;">⚠️ Warning — Safety Notice &amp;
+                            <h3 style="margin: 0; color: #f59e0b; font-size: 16px;">Warning — Safety Notice &amp;
                                 Disclaimer</h3>
                         </div>
                         <div class="modal-body" style="padding: 12px 0;">

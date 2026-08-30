@@ -1,16 +1,14 @@
 #include "adc_sampler.h"
+#include "shared_mem.h"
+#include "sigma_delta_dac.h"
 
-// 20000 bytes shared buffer. 
-// For Voltmeter: 10000 uint16_t. For Oscilloscope: 20000 uint8_t.
-#define DMA_BUF_BYTES 20000
-static uint16_t adcDmaBuf16[DMA_BUF_BYTES / 2];
-#define adcDmaBuf8 ((uint8_t*)adcDmaBuf16)
-
-#define PACK_BUF_SIZE 4096
-static uint8_t adcPackedBuf[PACK_BUF_SIZE];
-
-#define MAX_FRAME_SIZE 15000
-static uint8_t oscFrameBuf[MAX_FRAME_SIZE];
+// 24000 bytes shared DMA buffer (part of 48 KB pool). 
+// For Voltmeter: 12000 uint16_t. For Oscilloscope: 24000 uint8_t or 12000 uint16_t.
+#define DMA_BUF_BYTES DMA_BUF_DUAL_BYTES
+#define adcDmaBuf16   (g_sharedMem.dual.adc_dma_buf16)
+#define adcDmaBuf8    ((uint8_t*)g_sharedMem.dual.adc_dma_buf16)
+#define adcPackedBuf  (g_sharedMem.dual.osc_usb.adc_packed_buf)
+#define oscFrameBuf   (g_sharedMem.dual.osc_usb.osc_frame_buf)
 
 // Multi-channel scan state
 static uint8_t multiChList[4];   // Ordered list of active channels (0..3)
@@ -109,6 +107,9 @@ static inline void set_channel_bias(uint8_t pinIndex, bool enable) {
 #endif
 
 void adc_sampler_start(AdcConfig config) {
+    if (config.isOscilloscope) {
+        sigma_delta_dac_on_osc_start();
+    }
     currentConfig = config;
 
     // Build multi-channel list from pinMask. If pinMask is 0, fall back to single pin in config.pin
@@ -407,6 +408,7 @@ void adc_sampler_set_bias(bool enable) {
 }
 
 void adc_sampler_stop() {
+    sigma_delta_dac_on_osc_stop();
     isRunning = false;
     isEtsMode = false;
     #if defined(ARDUINO_ARCH_STM32)
@@ -609,7 +611,6 @@ bool adc_osc_process_frame(uint8_t** outPtr, uint16_t* outLen) {
             startIdx = (startIdx / bufElemsPerFrame) * bufElemsPerFrame;
 
             uint8_t over = currentConfig.oversample;
-            uint16_t outOffset = 0;
 
             // Demultiplex: for each channel, extract stride-subsequence and process.
             // Writes per-channel data in UNITS (uint16 if 12-bit, uint8 if 8-bit) starting at outUnits.
@@ -697,10 +698,6 @@ bool adc_osc_process_frame(uint8_t** outPtr, uint16_t* outLen) {
     return false;
 }
 
-void adc_sampler_loop() {
-    // Left empty for stability. PB9 is now strictly controlled by initialization in adc_sampler_start.
-}
-
 int adc_sampler_get_available(uint8_t** outPtr) {
     if (!isRunning || currentConfig.isOscilloscope) return 0;
     
@@ -760,7 +757,7 @@ uint32_t adc_sampler_measure_vrefint_sum4096() {
     ADC1->CR2 |= ADC_CR2_SWSTART;
     uint32_t timeout = 10000;
     while (!(ADC1->SR & ADC_SR_EOC) && --timeout);
-    uint16_t dump = ADC1->DR;
+    (void)ADC1->DR;
     
     uint32_t sum = 0;
     for (int i = 0; i < 4096; i++) {

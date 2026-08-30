@@ -24,6 +24,7 @@ const CMD_FR_STOP    = 0x62;
 
 const PKT_VOLTMETER_DATA     = 0x10;
 const PKT_OSCILLOSCOPE_DATA  = 0x12;
+const PKT_SIGMA_DELTA_READY  = 0x35;
 const PKT_VREF_DATA          = 0x20;
 const PKT_LOGIC_DATA         = 0x40;
 const PKT_COMP_RESULT        = 0x50;
@@ -34,6 +35,7 @@ class MicroTesterUSB {
         this.device = null;
         this.endpointIn = null;
         this.endpointOut = null;
+        this.interfaceNumber = -1;
         this.onConnect = null;
         this.onDisconnect = null;
         this.isReading = false;
@@ -117,6 +119,8 @@ class MicroTesterUSB {
                 if (ep.direction === 'out') this.endpointOut = ep.endpointNumber;
             }
 
+            this.interfaceNumber = interfaceNumber;
+
             // WebUSB control transfer to enable WebUSB CDC/Vendor
             await this.device.controlTransferOut({
                 requestType: 'class',
@@ -140,8 +144,20 @@ class MicroTesterUSB {
     async disconnect() {
         if (this.device) {
             this.isReading = false;
+            try {
+                if (this.interfaceNumber !== -1) {
+                    await this.device.controlTransferOut({
+                        requestType: 'class',
+                        recipient: 'interface',
+                        request: 0x22, // Set Control Line State
+                        value: 0x00,   // DTR = 0, RTS = 0 (Disconnected)
+                        index: this.interfaceNumber
+                    });
+                }
+            } catch (e) {}
             try { await this.device.close(); } catch(e){}
             this.device = null;
+            this.interfaceNumber = -1;
             console.log("MicroTester disconnected.");
             if (this.onDisconnect) this.onDisconnect();
         }
@@ -216,5 +232,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 statusDot.classList.add('disconnected');
             }
         };
+
+        window.addEventListener('beforeunload', () => {
+            if (microTester.device) microTester.disconnect();
+        });
+        window.addEventListener('pagehide', () => {
+            if (microTester.device) microTester.disconnect();
+        });
     }
 });

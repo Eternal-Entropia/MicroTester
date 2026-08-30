@@ -21,7 +21,6 @@ typedef struct {
 void adc_sampler_init();
 void adc_sampler_start(AdcConfig config);
 void adc_sampler_stop();
-void adc_sampler_loop();
 void adc_sampler_set_bias(bool enable);
 uint8_t adc_sampler_get_session_id();
 uint8_t adc_sampler_get_channel_mask();

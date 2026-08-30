@@ -1513,7 +1513,7 @@
             const setBtns = (t, dis) => btns.forEach((b, i) => { if (t !== null) b.innerHTML = t; b.disabled = dis; });
 
             oscZeroCalibBusy = true;
-            setBtns('⏳ 0%', true);
+            setBtns('0%', true);
             const wasRunning = oscState.running;
             try {
                 if (!wasRunning) startOsc();
@@ -1542,7 +1542,7 @@
                     }
                     acc += (mn + mx) / 2;
                     used++;
-                    setBtns('⏳ ' + Math.round((used / FRAMES) * 100) + '%', true);
+                    setBtns(Math.round((used / FRAMES) * 100) + '%', true);
                 }
                 if (!wasRunning) stopOsc();
 
@@ -1758,6 +1758,9 @@
         oscState.reqSamplesSent = samplesOnScreen;
 
         microTester.sendCommand(CMD_OSC_START, payload);
+        if (window.syncSignalGeneratorRamPreset) {
+            window.syncSignalGeneratorRamPreset();
+        }
 
         // Start rendering
         if (oscState.animFrameId) cancelAnimationFrame(oscState.animFrameId);
@@ -1770,6 +1773,9 @@
 
         oscState.running = false;
         microTester.sendCommand(CMD_OSC_STOP);
+        if (window.syncSignalGeneratorRamPreset) {
+            window.syncSignalGeneratorRamPreset();
+        }
 
         if (btnOscStartStop) {
             btnOscStartStop.innerHTML = '▶ Start';
@@ -1859,6 +1865,9 @@
         oscState.reqSamplesSent = samplesOnScreen;
 
         microTester.sendCommand(CMD_OSC_START, payload);
+        if (window.syncSignalGeneratorRamPreset) {
+            window.syncSignalGeneratorRamPreset();
+        }
     }
 
     function autoScale() {

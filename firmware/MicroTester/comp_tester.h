@@ -14,14 +14,15 @@
 #define COMP_SHORT       30
 #define COMP_OPEN        31
 
-// BJT/MOSFET subtypes (in flags)
+// BJT/MOSFET/Capacitor subtypes (in flags)
 #define FLAG_NPN         0x01
 #define FLAG_PNP         0x02
 #define FLAG_NCH         0x04
 #define FLAG_PCH         0x08
 #define FLAG_ENHANCEMENT 0x10
+#define FLAG_POLARIZED   0x20
 
-// Test result packet structure (binary, 16 bytes)
+// Test result packet structure (binary, 20 bytes)
 struct CompResult {
     uint8_t type;        // COMP_xxx
     uint8_t pinA;        // Probe assignment A (0-2)
@@ -31,6 +32,7 @@ struct CompResult {
     uint32_t value2;     // Secondary (caps): ESR*100. Also: Rdc*100, Vbe(mV), Vth(mV)
     uint32_t value3;     // Tertiary (caps): tan(delta)*10000 @ 120 Hz. Also: test freq, Cg
     uint16_t flags;      // Subtype flags
+    uint16_t vloss_x10;  // Vloss in 0.1% units (e.g. 14 = 1.4% voltage self-discharge in Hi-Z)
 };
 
 void comp_tester_init();

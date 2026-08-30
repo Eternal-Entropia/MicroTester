@@ -9,25 +9,25 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- UI Elements ---
-    const cfgPwmDacWaveform  = document.getElementById('cfgPwmDacWaveform');
-    const cfgPwmDacFreq      = document.getElementById('cfgPwmDacFreq');
+    const cfgPwmDacWaveform = document.getElementById('cfgPwmDacWaveform');
+    const cfgPwmDacFreq = document.getElementById('cfgPwmDacFreq');
     const cfgPwmDacFreqRange = document.getElementById('cfgPwmDacFreqRange');
-    const cfgPwmDacDuty      = document.getElementById('cfgPwmDacDuty');
+    const cfgPwmDacDuty = document.getElementById('cfgPwmDacDuty');
     const cfgPwmDacDutyRange = document.getElementById('cfgPwmDacDutyRange');
-    const cfgPwmDacPin       = document.getElementById('cfgPwmDacPin');
+    const cfgPwmDacPin = document.getElementById('cfgPwmDacPin');
 
     const btnPwmDacStart = document.getElementById('btnPwmDacStart');
-    const btnPwmDacStop  = document.getElementById('btnPwmDacStop');
+    const btnPwmDacStop = document.getElementById('btnPwmDacStop');
 
     // Display Elements
     const lblPwmDacPeriod = document.getElementById('lblPwmDacPeriod');
-    const lblPwmDacTHigh  = document.getElementById('lblPwmDacTHigh');
-    const lblPwmDacTLow   = document.getElementById('lblPwmDacTLow');
-    const lblPwmDacResolution    = document.getElementById('lblPwmDacResolution');
+    const lblPwmDacTHigh = document.getElementById('lblPwmDacTHigh');
+    const lblPwmDacTLow = document.getElementById('lblPwmDacTLow');
+    const lblPwmDacResolution = document.getElementById('lblPwmDacResolution');
     const lblPwmDacStepPrecision = document.getElementById('lblPwmDacStepPrecision');
     const lblPwmDacStatus = document.getElementById('lblPwmDacStatus');
     const pwmDacIndicator = document.getElementById('pwmDacIndicator');
-    const canvas       = document.getElementById('pwmDacWaveCanvas');
+    const canvas = document.getElementById('pwmDacWaveCanvas');
     const cfgShowLevelLabels = document.getElementById('cfgShowLevelLabels');
 
     const showLevelLabels = () => !cfgShowLevelLabels || cfgShowLevelLabels.checked;
@@ -38,14 +38,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         const connected = !!(microTester && microTester.device);
         if (btnPwmDacStart) btnPwmDacStart.disabled = !connected || isRunning;
-        if (btnPwmDacStop)  btnPwmDacStop.disabled  = !connected || !isRunning;
+        if (btnPwmDacStop) btnPwmDacStop.disabled = !connected || !isRunning;
     }, 500);
 
     // --- Helper: Format Time Units ---
     function formatTime(seconds) {
         if (seconds < 1e-6) return (seconds * 1e9).toFixed(1) + ' ns';
         if (seconds < 1e-3) return (seconds * 1e6).toFixed(2) + ' µs';
-        if (seconds < 1)    return (seconds * 1e3).toFixed(2) + ' ms';
+        if (seconds < 1) return (seconds * 1e3).toFixed(2) + ' ms';
         return seconds.toFixed(3) + ' s';
     }
 
@@ -70,12 +70,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return sdPrng(n) * 2 - 1; // [-1,1]
     }
 
+    function getSdMaxBytes() {
+        const isOscActive = !!(window.oscState && window.oscState.running);
+        return isOscActive ? 12000 : 48000;
+    }
+
     // --- 2nd-Order Sigma-Delta (Σ-Δ) Modulator Bitstream Generator ---
     function pickSdParams(freqHz) {
-        // Choose the highest SPI bitrate whose full cycle fits the 16 KB buffer:
-        // bitrate/freq <= 128000 bits. Below ~328 Hz @42 MHz the prescaler drops
-        // (42MHz/2^n), extending the floor to ~2.6 Hz at BR=/256.
-        const MAX_BITS = 16000 * 8;
+        // Choose the highest SPI bitrate whose full cycle fits the buffer:
+        // 48 KB (384,000 bits) when osc is stopped, 12 KB (96,000 bits) when osc is running.
+        const maxBytes = getSdMaxBytes();
+        const MAX_BITS = maxBytes * 8;
         let exp = 7;
         for (let e = 0; e <= 7; e++) {
             const br = 84000000 / Math.pow(2, e + 1);
@@ -90,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function generateSigmaDeltaBitstream(mode, freqHz, dutyPct = 50) {
         const { prescalerExp, bitRate } = pickSdParams(freqHz);
         const SPI_FREQ = bitRate; // chosen SPI bit rate
-        const MAX_BYTES = 16000;   // 16 KB buffer = 128,000 bits
+        const MAX_BYTES = getSdMaxBytes();   // 48 KB buffer alone or 12 KB in dual mode
         const MAX_BITS = MAX_BYTES * 8;
 
         let idealPeriodBits = SPI_FREQ / Math.max(1, freqHz);
@@ -102,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // If the requested frequency is too low to fit 1 full cycle in 4KB (< 1281 Hz),
             // we MUST force exactly 1 full cycle to fit in the maximum buffer to prevent phase jumps.
             numBytes = MAX_BYTES;
-            numCycles = 1; 
+            numCycles = 1;
         } else {
             // Medium/High frequency: find optimal integer number of full cycles that fit into MAX_BYTES
             let maxK = Math.floor(MAX_BITS / idealPeriodBits);
@@ -132,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let totalBits = numBytes * 8;
         const buffer = new Uint8Array(numBytes);
-        
+
         let integ1 = 0.0;
         let integ2 = 0.0;
         let y_prev = 0.0;
@@ -231,18 +236,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isDc) {
             if (lblPwmDacPeriod) lblPwmDacPeriod.innerText = 'DC';
-            if (lblPwmDacTHigh)  lblPwmDacTHigh.innerText  = 'Continuous';
-            if (lblPwmDacTLow)   lblPwmDacTLow.innerText   = '0 ms';
-            if (lblPwmDacResolution)    lblPwmDacResolution.innerText    = '42 MHz Σ-Δ PDM';
+            if (lblPwmDacTHigh) lblPwmDacTHigh.innerText = 'Continuous';
+            if (lblPwmDacTLow) lblPwmDacTLow.innerText = '0 ms';
+            if (lblPwmDacResolution) lblPwmDacResolution.innerText = '42 MHz Σ-Δ PDM';
             if (lblPwmDacStepPrecision) lblPwmDacStepPrecision.innerText = '16-bit ENOB';
         } else {
             const periodSec = 1.0 / freq;
-            const tHighSec  = periodSec * (duty / 100.0);
-            const tLowSec   = periodSec - tHighSec;
+            const tHighSec = periodSec * (duty / 100.0);
+            const tLowSec = periodSec - tHighSec;
 
             if (lblPwmDacPeriod) lblPwmDacPeriod.innerText = formatTime(periodSec);
-            if (lblPwmDacTHigh)  lblPwmDacTHigh.innerText  = formatTime(tHighSec);
-            if (lblPwmDacTLow)   lblPwmDacTLow.innerText   = formatTime(tLowSec);
+            if (lblPwmDacTHigh) lblPwmDacTHigh.innerText = formatTime(tHighSec);
+            if (lblPwmDacTLow) lblPwmDacTLow.innerText = formatTime(tLowSec);
 
             // Dynamic ENOB & OverSampling Ratio (OSR) Calculation
             const { bitRate: sdBitRate, actual: sdActualFreq } = pickSdParams(freq);
@@ -251,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const levels = Math.pow(2, enob);
             const stepPct = (100.0 / levels).toFixed(enob >= 10 ? 3 : 1);
 
-            if (lblPwmDacResolution)    lblPwmDacResolution.innerText    = `${enob}-bit ENOB (${levels.toLocaleString()} levels @ OSR=${osr.toLocaleString()})`;
+            if (lblPwmDacResolution) lblPwmDacResolution.innerText = `${enob}-bit ENOB (${levels.toLocaleString()} levels @ OSR=${osr.toLocaleString()})`;
             if (lblPwmDacStepPrecision) lblPwmDacStepPrecision.innerText = `±${stepPct}%`;
         }
 
@@ -280,8 +285,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
             }
 
-            const yMid  = h / 2;
-            const yAmp  = (h / 2) - 25;
+            const yMid = h / 2;
+            const yAmp = (h / 2) - 25;
 
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 3;
@@ -336,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const infoStr = isDc ? `DC Level: ${(3.3 * duty / 100).toFixed(2)}V` :
                 (isNoise ? `Noise Bandwidth: ${formatFreq(actualFreq)}` :
-                `Freq: ${formatFreq(actualFreq)}  |  ENOB: ${enob}-bit`);
+                    `Freq: ${formatFreq(actualFreq)}  |  ENOB: ${enob}-bit`);
             ctx.fillStyle = '#cbd5e1';
             ctx.fillText(infoStr, w - ctx.measureText(infoStr).width - 16, 25);
         }
@@ -349,6 +354,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const mode = cfgPwmDacWaveform?.value || 'sd_sine';
         const isSigmaDelta = mode.startsWith('sd_');
 
+        if (lblPwmDacStatus) {
+            lblPwmDacStatus.innerText = 'WAIT...';
+            lblPwmDacStatus.className = 'status-badge waiting';
+        }
+        if (pwmDacIndicator) pwmDacIndicator.classList.remove('active');
+
         if (isSigmaDelta) {
             const isNoise = (mode === 'sd_noise');
             let freq = Math.max(1, Math.min(42000000, parseInt(cfgPwmDacFreq?.value || '1000')));
@@ -359,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Chunk transfer over WebUSB
             const pinSelect = document.getElementById('cfgPwmDacPin');
             const pinVal = pinSelect ? parseInt(pinSelect.value) : 0; // 0=PB5, 1=PA7
-            const CHUNK_SIZE = 32;
+            const CHUNK_SIZE = 58;
             let offset = 0;
 
             // Header Packet: CMD_SIGMA_DELTA_START [pin, prescalerExp, bufSize_lo, bufSize_hi, data...]
@@ -386,10 +397,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 offset += len;
             }
         } else {
-            const pin      = parseInt(cfgPwmDacPin?.value || '0');
+            const pin = parseInt(cfgPwmDacPin?.value || '0');
             const waveform = parseInt(mode);
-            const freq     = Math.max(1, Math.min(42000000, parseInt(cfgPwmDacFreq?.value || '1000')));
-            const duty     = Math.min(100, Math.max(0, parseInt(cfgPwmDacDuty?.value || '50')));
+            const freq = Math.max(1, Math.min(42000000, parseInt(cfgPwmDacFreq?.value || '1000')));
+            const duty = Math.min(100, Math.max(0, parseInt(cfgPwmDacDuty?.value || '50')));
 
             const payload = new Uint8Array(7);
             payload[0] = pin;
@@ -401,6 +412,11 @@ document.addEventListener('DOMContentLoaded', () => {
             payload[6] = duty;
 
             microTester.sendCommand(CMD_SIG_START, payload);
+            if (lblPwmDacStatus) {
+                lblPwmDacStatus.innerText = 'GENERATING';
+                lblPwmDacStatus.className = 'status-badge active';
+            }
+            if (pwmDacIndicator) pwmDacIndicator.classList.add('active');
         }
     }
 
@@ -409,6 +425,14 @@ document.addEventListener('DOMContentLoaded', () => {
         microTester.sendCommand(CMD_SIGMA_DELTA_STOP);
         microTester.sendCommand(CMD_SIG_STOP);
     }
+
+    window.syncSignalGeneratorRamPreset = async function() {
+        if (!isRunning || !microTester || !microTester.device) return;
+        const mode = cfgPwmDacWaveform?.value || 'sd_sine';
+        if (mode.startsWith('sd_')) {
+            await sendPwmDacStart();
+        }
+    };
 
 
     let dacStartTimeout = null;
@@ -533,17 +557,18 @@ document.addEventListener('DOMContentLoaded', () => {
         btnPwmDacStart.addEventListener('click', () => {
             if (!microTester || !microTester.device) return alert("Connect USB first!");
 
-            sendPwmDacStart();
             isRunning = true;
 
             if (lblPwmDacStatus) {
-                lblPwmDacStatus.innerText = 'GENERATING';
-                lblPwmDacStatus.className = 'status-badge active';
+                lblPwmDacStatus.innerText = 'WAIT...';
+                lblPwmDacStatus.className = 'status-badge waiting';
             }
-            if (pwmDacIndicator) pwmDacIndicator.classList.add('active');
+            if (pwmDacIndicator) pwmDacIndicator.classList.remove('active');
 
             if (btnPwmDacStart) btnPwmDacStart.disabled = true;
             if (btnPwmDacStop) btnPwmDacStop.disabled = false;
+
+            sendPwmDacStart();
         });
     }
 
@@ -564,8 +589,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (typeof microTester !== 'undefined') {
+        // Listen for hardware confirmation that bitstream is loaded and DMA playback started
+        microTester.addDataListener((data) => {
+            if (data && data[0] === PKT_SIGMA_DELTA_READY) {
+                if (isRunning) {
+                    if (lblPwmDacStatus) {
+                        lblPwmDacStatus.innerText = 'GENERATING';
+                        lblPwmDacStatus.className = 'status-badge active';
+                    }
+                    if (pwmDacIndicator) pwmDacIndicator.classList.add('active');
+                }
+            }
+        });
+
+        const origConn = microTester.onConnect;
+        microTester.onConnect = function () {
+            if (origConn) origConn.apply(this, arguments);
+            isRunning = false;
+            if (lblPwmDacStatus) {
+                lblPwmDacStatus.innerText = 'STOPPED';
+                lblPwmDacStatus.className = 'status-badge stopped';
+            }
+            if (pwmDacIndicator) pwmDacIndicator.classList.remove('active');
+            if (btnPwmDacStart) btnPwmDacStart.disabled = false;
+            if (btnPwmDacStop) btnPwmDacStop.disabled = true;
+        };
+
         const origDis = microTester.onDisconnect;
-        microTester.onDisconnect = function() {
+        microTester.onDisconnect = function () {
             if (origDis) origDis.apply(this, arguments);
             isRunning = false;
             if (lblPwmDacStatus) {
@@ -586,28 +637,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const freqKnobFill = document.getElementById('freqKnobFillDac');
     const freqKnobThumb = document.getElementById('freqKnobThumbDac');
     const freqKnobText = document.getElementById('freqKnobTextDac');
-    
+
     let isKnobDragging = false;
     let lastKnobAngle = 0;
     const MAX_TURNS = 5.0;
 
     function freqToTurns(freq) {
         freq = Math.max(1, Math.min(1000000, freq));
-        if (freq <= 100)        return 0.0 + (freq - 1) / 99;
-        if (freq <= 1000)       return 1.0 + (freq - 100) / 900;
-        if (freq <= 10000)      return 2.0 + (freq - 1000) / 9000;
-        if (freq <= 100000)     return 3.0 + (freq - 10000) / 90000;
+        if (freq <= 100) return 0.0 + (freq - 1) / 99;
+        if (freq <= 1000) return 1.0 + (freq - 100) / 900;
+        if (freq <= 10000) return 2.0 + (freq - 1000) / 9000;
+        if (freq <= 100000) return 3.0 + (freq - 10000) / 90000;
         return 4.0 + (freq - 100000) / 900000;
     }
 
     function turnsToFreq(turns) {
         turns = Math.max(0, Math.min(MAX_TURNS, turns));
         let f;
-        if (turns <= 1.0)      f = 1 + turns * 99;
+        if (turns <= 1.0) f = 1 + turns * 99;
         else if (turns <= 2.0) f = 100 + (turns - 1.0) * 900;
         else if (turns <= 3.0) f = 1000 + (turns - 2.0) * 9000;
         else if (turns <= 4.0) f = 10000 + (turns - 3.0) * 90000;
-        else                   f = 100000 + (turns - 4.0) * 900000;
+        else f = 100000 + (turns - 4.0) * 900000;
         return Math.round(f);
     }
 
@@ -616,15 +667,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const turns = freqToTurns(freq);
         let turnFraction = turns % 1.0;
         if (turns >= MAX_TURNS) turnFraction = turns - Math.floor(turns);
-        
+
         const totalDash = 251.33;
         freqKnobFill.style.strokeDashoffset = totalDash - (turnFraction * totalDash);
-        
+
         const angle = -90 + (turnFraction * 360);
         const rad = angle * Math.PI / 180;
         freqKnobThumb.setAttribute('cx', 50 + 40 * Math.cos(rad));
         freqKnobThumb.setAttribute('cy', 50 + 40 * Math.sin(rad));
-        
+
         if (freq >= 1e6) {
             freqKnobText.innerHTML = (freq / 1e6).toFixed(2) + '<br><span style="font-size:12px; color: #94a3b8">MHz</span>';
         } else if (freq >= 1e3) {
@@ -639,32 +690,32 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleKnobStart(e) {
         if (!freqKnob) return;
         isKnobDragging = true;
-        
+
         const currentFreq = Math.max(1, Math.min(1000000, parseFloat(cfgPwmDacFreq?.value || 1000)));
         dragTurns = freqToTurns(currentFreq);
 
         const rect = freqKnob.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        
+
         let clientX = e.clientX;
         let clientY = e.clientY;
         if (e.touches && e.touches.length > 0) {
             clientX = e.touches[0].clientX;
             clientY = e.touches[0].clientY;
         }
-        
+
         lastKnobAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
     }
 
     function quantizeFreq(freq) {
         freq = Math.max(1, Math.min(1000000, freq));
         let step = 1;
-        if (freq < 100)          step = 1;         // 1 - 100 Hz -> 1 Hz
-        else if (freq < 1000)    step = 10;        // 100 - 1000 Hz -> 10 Hz
-        else if (freq < 10000)   step = 100;       // 1 - 10 kHz -> 100 Hz (1.1, 1.2 kHz)
-        else if (freq < 100000)  step = 1000;      // 10 - 100 kHz -> 1 kHz (10, 11, 12... 100 kHz)
-        else                     step = 10000;     // 100 - 1000 kHz -> 10 kHz (100, 110, 120... 1000 kHz)
+        if (freq < 100) step = 1;         // 1 - 100 Hz -> 1 Hz
+        else if (freq < 1000) step = 10;        // 100 - 1000 Hz -> 10 Hz
+        else if (freq < 10000) step = 100;       // 1 - 10 kHz -> 100 Hz (1.1, 1.2 kHz)
+        else if (freq < 100000) step = 1000;      // 10 - 100 kHz -> 1 kHz (10, 11, 12... 100 kHz)
+        else step = 10000;     // 100 - 1000 kHz -> 10 kHz (100, 110, 120... 1000 kHz)
 
         return Math.min(1000000, Math.max(1, Math.round(freq / step) * step));
     }
@@ -672,27 +723,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleKnobMove(e) {
         if (!isKnobDragging || !freqKnob) return;
         e.preventDefault();
-        
+
         const rect = freqKnob.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        
+
         let clientX = e.clientX;
         let clientY = e.clientY;
         if (e.touches && e.touches.length > 0) {
             clientX = e.touches[0].clientX;
             clientY = e.touches[0].clientY;
         }
-        
+
         const currentAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
         let delta = currentAngle - lastKnobAngle;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
-        
+
         lastKnobAngle = currentAngle;
-        
+
         dragTurns = Math.max(0, Math.min(MAX_TURNS, dragTurns + (delta / 360)));
-        
+
         let newFreq = turnsToFreq(dragTurns);
         newFreq = quantizeFreq(newFreq);
 
@@ -715,61 +766,61 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!dutyKnobFill || !dutyKnobThumb || !dutyKnobText) return;
         const clampedDuty = Math.max(0, Math.min(100, duty));
         const turnFraction = clampedDuty / 100.0;
-        
+
         const totalDash = 251.33;
         dutyKnobFill.style.strokeDashoffset = totalDash - (turnFraction * totalDash);
-        
+
         const angle = -90 + (turnFraction * 360);
         const rad = angle * Math.PI / 180;
         dutyKnobThumb.setAttribute('cx', 50 + 40 * Math.cos(rad));
         dutyKnobThumb.setAttribute('cy', 50 + 40 * Math.sin(rad));
-        
+
         dutyKnobText.innerHTML = clampedDuty.toFixed(0) + '<br><span style="font-size:11px; color: #94a3b8">%</span>';
     }
 
     function handleDutyKnobStart(e) {
         if (!dutyKnob) return;
         isDutyKnobDragging = true;
-        
+
         const rect = dutyKnob.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        
+
         let clientX = e.clientX;
         let clientY = e.clientY;
         if (e.touches && e.touches.length > 0) {
             clientX = e.touches[0].clientX;
             clientY = e.touches[0].clientY;
         }
-        
+
         lastDutyKnobAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
     }
 
     function handleDutyKnobMove(e) {
         if (!isDutyKnobDragging || !dutyKnob) return;
         e.preventDefault();
-        
+
         const rect = dutyKnob.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        
+
         let clientX = e.clientX;
         let clientY = e.clientY;
         if (e.touches && e.touches.length > 0) {
             clientX = e.touches[0].clientX;
             clientY = e.touches[0].clientY;
         }
-        
+
         const currentAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
         let delta = currentAngle - lastDutyKnobAngle;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
-        
+
         lastDutyKnobAngle = currentAngle;
-        
+
         const currentDuty = Math.max(0, Math.min(100, parseFloat(cfgPwmDacDuty?.value || 50)));
         let newDuty = Math.max(0, Math.min(100, Math.round(currentDuty + (delta / 3.6))));
-        
+
         if (cfgPwmDacDuty) {
             cfgPwmDacDuty.value = newDuty;
             cfgPwmDacDuty.dispatchEvent(new Event('input'));
@@ -778,15 +829,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (freqKnob) {
         freqKnob.addEventListener('mousedown', (e) => handleKnobStart(e));
-        freqKnob.addEventListener('touchstart', (e) => handleKnobStart(e), {passive: false});
-        
+        freqKnob.addEventListener('touchstart', (e) => handleKnobStart(e), { passive: false });
+
         freqKnob.addEventListener('wheel', adjustFreqByWheel, { passive: false });
     }
 
     if (dutyKnob) {
         dutyKnob.addEventListener('mousedown', (e) => handleDutyKnobStart(e));
-        dutyKnob.addEventListener('touchstart', (e) => handleDutyKnobStart(e), {passive: false});
-        
+        dutyKnob.addEventListener('touchstart', (e) => handleDutyKnobStart(e), { passive: false });
+
         dutyKnob.addEventListener('wheel', (e) => {
             if (cfgPwmDacDuty?.disabled) return;
             e.preventDefault();
@@ -802,8 +853,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.addEventListener('mousemove', (e) => { handleKnobMove(e); handleDutyKnobMove(e); });
-    document.addEventListener('touchmove', (e) => { handleKnobMove(e); handleDutyKnobMove(e); }, {passive: false});
-    
+    document.addEventListener('touchmove', (e) => { handleKnobMove(e); handleDutyKnobMove(e); }, { passive: false });
+
     document.addEventListener('mouseup', () => { isKnobDragging = false; isDutyKnobDragging = false; });
     document.addEventListener('touchend', () => { isKnobDragging = false; isDutyKnobDragging = false; });
 
