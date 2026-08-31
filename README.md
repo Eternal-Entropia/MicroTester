@@ -61,6 +61,8 @@ Release v1.1: added link in hydra fw port. ui minor fix
 
 Release v1.2:fix capasitors. added custom oversampling in callibration.more minor fix
 
+Release v1.3:added phase sweep(experimental). fix inductors test
+
 Lib usage in project:
 
 usbdfu: https://github.com/devanlai/webdfu
