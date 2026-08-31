@@ -537,13 +537,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Preset Resolution Buttons
+    // Preset Resolution Buttons (16-bit down to 12-bit)
     document.querySelectorAll('.pwm-dac-res-preset-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const bits = parseInt(btn.getAttribute('data-res'));
+            const bits = parseInt(btn.getAttribute('data-res'), 10);
             if (bits && cfgPwmDacFreq) {
-                const targetSteps = Math.pow(2, bits);
-                const freqHz = Math.round(84000000 / targetSteps);
+                let freqHz;
+                if (bits >= 16) freqHz = 325000;
+                else if (bits === 15) freqHz = 430000;
+                else if (bits === 14) freqHz = 575000;
+                else if (bits === 13) freqHz = 750000;
+                else freqHz = 1000000; // 12-bit @ 1 MHz
+
                 cfgPwmDacFreq.value = freqHz;
                 if (cfgPwmDacFreqRange) cfgPwmDacFreqRange.value = Math.log10(freqHz);
                 updateCalculationsAndPreview();

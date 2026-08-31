@@ -420,7 +420,7 @@
 
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Release v1.2
+                    MicroTester Release v1.3
                 </div>
             </div>
         </aside>
@@ -983,26 +983,47 @@
                 <div class="tab-panel" id="panel-freqresp">
                     <!-- Toolbar Card -->
                     <div class="card"
-                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
-                        <div style="display: flex; gap: 12px; align-items: center;">
-                            <button class="btn btn-success btn-sm" id="btnFrSweep">
-                                ▶ Start Sweep
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <button class="btn btn-success btn-sm" id="btnFrSweep" title="Sweep Magnitude">
+                                Gain Sweep
+                            </button>
+                            <button class="btn btn-warning btn-sm" id="btnFrSweepPhase" style="background: #f59e0b; color: #0f172a; font-weight: 600; border: none;" title="Sweep Phase (Experimental)">
+                                Phase Sweep (experimental)
+                            </button>
+                            <button class="btn btn-info btn-sm" id="btnFrSweepBode" style="background: #0284c7; color: #fff; font-weight: 600; border: none;" title="Sweep Both Gain and Phase (Bode)">
+                                Bode (Both)
                             </button>
                             <button class="btn btn-danger btn-sm" id="btnFrStop" disabled>
-                                ■ Stop
+                                Stop
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="btnFrCalibToolbar" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Calibrate Loopback Reference (Gain & Phase)">
+                                Calibrate
                             </button>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <!-- View mode buttons -->
+                            <div style="display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.2);">
+                                <button class="btn btn-sm fr-view-toggle active" id="btnFrViewGain" style="padding: 3px 8px; font-size: 11px; border-radius: 0; border: none;">Gain</button>
+                                <button class="btn btn-sm fr-view-toggle" id="btnFrViewPhase" style="padding: 3px 8px; font-size: 11px; border-radius: 0; border: none;">Phase</button>
+                                <button class="btn btn-sm fr-view-toggle" id="btnFrViewBoth" style="padding: 3px 8px; font-size: 11px; border-radius: 0; border: none;">Bode</button>
+                            </div>
                             <span class="text-xs text-muted" id="lblFrRange"></span>
                         </div>
                     </div>
 
                     <!-- Bode Plot Card -->
                     <div class="card" style="padding: 16px; position: relative;">
-                        <div class="config-title" style="margin-bottom: 8px;">Bode Plot (Magnitude)</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div class="config-title" id="lblFrPlotTitle" style="margin-bottom: 0;">Frequency Response (Gain)</div>
+                            <div style="display: flex; gap: 16px; font-size: 12px; font-weight: 600;">
+                                <span id="legendFrGain" style="color: #38bdf8; display: inline-flex; align-items: center; gap: 4px;">Gain (dB)</span>
+                                <span id="legendFrPhase" style="color: #fbbf24; display: inline-flex; align-items: center; gap: 4px;">Phase (deg)</span>
+                            </div>
+                        </div>
                         <div
                             style="width: 100%; border-radius: var(--radius-sm); overflow: hidden; background: #0f172a;">
-                            <canvas id="frCanvas" style="width: 100%; height: 300px; display: block;"></canvas>
+                            <canvas id="frCanvas" style="width: 100%; height: 320px; display: block;"></canvas>
                         </div>
                     </div>
 
@@ -1393,6 +1414,22 @@
                                     <button class="btn btn-outline btn-sm pwm-dac-preset-btn" data-freq="1000000"
                                         style="padding: 2px 6px; font-size: 11px;">1 MHz</button>
                                 </div>
+                                <!-- Signal Gen Resolution Presets -->
+                                <div
+                                    style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 2px;">
+                                    <span class="text-xs text-muted"
+                                        style="margin-right: 2px; font-weight: 600;">Signal Gen Res:</span>
+                                    <button class="btn btn-outline btn-sm pwm-dac-res-preset-btn" data-res="16"
+                                        style="padding: 2px 6px; font-size: 11px; border-color: rgba(56, 189, 248, 0.4);">16-bit</button>
+                                    <button class="btn btn-outline btn-sm pwm-dac-res-preset-btn" data-res="15"
+                                        style="padding: 2px 6px; font-size: 11px; border-color: rgba(56, 189, 248, 0.4);">15-bit</button>
+                                    <button class="btn btn-outline btn-sm pwm-dac-res-preset-btn" data-res="14"
+                                        style="padding: 2px 6px; font-size: 11px; border-color: rgba(56, 189, 248, 0.4);">14-bit</button>
+                                    <button class="btn btn-outline btn-sm pwm-dac-res-preset-btn" data-res="13"
+                                        style="padding: 2px 6px; font-size: 11px; border-color: rgba(56, 189, 248, 0.4);">13-bit</button>
+                                    <button class="btn btn-outline btn-sm pwm-dac-res-preset-btn" data-res="12"
+                                        style="padding: 2px 6px; font-size: 11px; border-color: rgba(56, 189, 248, 0.4);">12-bit</button>
+                                </div>
                             </div>
 
                             <!-- Column 2: Large Frequency Knob -->
@@ -1707,7 +1744,7 @@
                         </div>
 
                         <div style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-                            MicroTester Release v1.2
+                            MicroTester Release v1.3
                         </div>
 
                         <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">
@@ -1835,6 +1872,15 @@
                         <div class="modal-body" style="padding: 12px 0;">
                             <div id="frModalStepDesc"
                                 style="font-size: 13px; color: #cbd5e1; line-height: 1.6; margin-bottom: 16px;">
+                            </div>
+                            <div id="frModalTargetRow"
+                                style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+                                <span style="font-size: 12px; color: #94a3b8;">Calibration target:</span>
+                                <select class="form-control" id="frCalibTarget" style="width: 180px; font-size: 12px;">
+                                    <option value="both" selected>Gain & Phase (Both)</option>
+                                    <option value="gain">Gain Only (АЧХ)</option>
+                                    <option value="phase">Phase Only (ФЧХ)</option>
+                                </select>
                             </div>
                             <div id="frModalPointsRow"
                                 style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">

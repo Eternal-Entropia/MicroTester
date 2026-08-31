@@ -374,6 +374,17 @@ void adc_sampler_capture_burst(uint8_t pinIndex, uint16_t* outBuf, uint16_t coun
     ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON;
     
     DMA2_Stream0->CR |= DMA_SxCR_EN;
+
+    // Hardware Phase-Lock Synchronizer:
+    // If Sigma-Delta DAC is pre-loaded for sync, start it at t=0 simultaneously with TIM2
+    if (sigma_delta_dac_is_sync_ready()) {
+        sigma_delta_dac_trigger_sync();
+    } else if ((RCC->APB2ENR & RCC_APB2ENR_TIM1EN) && (TIM1->CR1 & TIM_CR1_CEN)) {
+        TIM1->CNT = 0;
+        TIM1->EGR = TIM_EGR_UG;
+    }
+
+    TIM2->CNT = 0;
     TIM2->CR1 |= TIM_CR1_CEN;
 
     // Wait for the full capture. The window can outlast a fixed loop count by far:

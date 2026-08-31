@@ -14,7 +14,7 @@
 void fr_init();
 void fr_start(uint8_t outPinIdx, uint8_t inPinIdx, uint32_t directLimitHz = 1000000UL, uint8_t oversampling = 16);
 void fr_stop();
-bool fr_measure_point(uint32_t freqHz, uint8_t mode, uint32_t* out);
+bool fr_measure_point(uint32_t freqHz, uint8_t mode, uint32_t* out_mag, int16_t* out_phase_cdeg = NULL);
 
 // Diagnostics: window length (samples) and sample rate (kHz) of the last direct
 // measurement, reported to the host so the coherence of the capture can be verified.

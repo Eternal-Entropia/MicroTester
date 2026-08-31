@@ -12,6 +12,10 @@ uint16_t sigma_delta_dac_get_buf_len();
 uint16_t sigma_delta_dac_get_max_buf_size();
 void sigma_delta_dac_write_chunk(uint16_t offset, const uint8_t* data, uint16_t len);
 void sigma_delta_dac_play_sine(uint8_t pin, uint32_t freqHz);
+void sigma_delta_dac_prepare_sine_sync(uint8_t pin, uint32_t freqHz);
+bool sigma_delta_dac_is_sync_ready();
+void sigma_delta_dac_trigger_sync();
+uint32_t sigma_delta_dac_get_actual_freq();
 void sigma_delta_dac_stop();
 
 // Dynamic RAM switching hooks

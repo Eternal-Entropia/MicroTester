@@ -665,3 +665,23 @@
 .knob-thumb {
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }
+
+/* Frequency Response View Toggles */
+.fr-view-toggle {
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.fr-view-toggle:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.fr-view-toggle.active {
+    background: #0284c7 !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}

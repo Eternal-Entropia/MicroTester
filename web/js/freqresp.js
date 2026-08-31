@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
         n: 96,
         oversample: 16,
         mode: 'sine',
+        viewMode: 'gain', // 'gain' (АЧХ), 'phase' (ФЧХ), 'both' (Боде)
         calFmin: 0,
         calFmax: 0,
         calN: 0,
@@ -48,6 +49,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // DOM Elements
     const btnSweep = document.getElementById('btnFrSweep');
+    const btnSweepPhase = document.getElementById('btnFrSweepPhase');
+    const btnSweepBode = document.getElementById('btnFrSweepBode');
+    const btnViewGain = document.getElementById('btnFrViewGain');
+    const btnViewPhase = document.getElementById('btnFrViewPhase');
+    const btnViewBoth = document.getElementById('btnFrViewBoth');
+    const lblPlotTitle = document.getElementById('lblFrPlotTitle');
+    const legendGain = document.getElementById('legendFrGain');
+    const legendPhase = document.getElementById('legendFrPhase');
+
     const btnStop = document.getElementById('btnFrStop');
     const btnFrCalibToolbar = document.getElementById('btnFrCalibToolbar');
     const btnCalibDiode = document.getElementById('btnFrCalibDiode');
@@ -170,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 val = 2500;
             }
-            return { freq: f >>> 0, mode: m, value: Math.max(1, val) >>> 0, isDefault: true };
+            return { freq: f >>> 0, mode: m, value: Math.max(1, val) >>> 0, phase: 0.0, isDefault: true };
         });
     }
 
@@ -201,6 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         freq: p.freq >>> 0,
                         mode: normalizeMode(p.mode),
                         value: p.value >>> 0,
+                        phase: (p.phase !== undefined && isFinite(p.phase)) ? p.phase : 0.0,
                         isDefault: !!p.isDefault
                     }));
                 }
@@ -208,7 +219,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.dut = parsed.dut.map(p => ({
                         freq: p.freq >>> 0,
                         mode: normalizeMode(p.mode),
-                        value: p.value >>> 0
+                        value: p.value >>> 0,
+                        phase: (p.phase !== undefined && isFinite(p.phase)) ? p.phase : 0.0
                     }));
                 } else {
                     state.dut = [];
@@ -377,7 +389,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const resp = await requestPoint(f, mode);
                 if (!resp) break;
                 const pointMode = (resp.mode !== 0xFF && resp.mode !== undefined) ? resp.mode : mode;
-                state.dut.push({ freq: resp.freq >>> 0, mode: normalizeMode(pointMode), value: resp.value >>> 0 });
+                state.dut.push({ 
+                    freq: resp.freq >>> 0, 
+                    mode: normalizeMode(pointMode), 
+                    value: resp.value >>> 0,
+                    phase: (resp.phase !== undefined && isFinite(resp.phase)) ? resp.phase : 0.0
+                });
                 render();
             } catch (err) {
                 if (window.MTLogger) window.MTLogger.warn('fr:point_err', 'point failed', { f, err: err?.message || err });
@@ -390,6 +407,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function setButtons() {
         const conn = !!(typeof microTester !== 'undefined' && microTester.device);
         if (btnSweep) btnSweep.disabled = state.busy;
+        if (btnSweepPhase) btnSweepPhase.disabled = state.busy;
+        if (btnSweepBode) btnSweepBode.disabled = state.busy;
         if (btnFrCalibToolbar) btnFrCalibToolbar.disabled = state.busy;
         if (btnCalibDiode) btnCalibDiode.disabled = state.busy;
         if (btnCalibDirect) btnCalibDirect.disabled = state.busy;
@@ -423,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const v = (m === FR_MODE_DIODE && !p.isDefault) ? Math.max(1, rawV - z) : rawV;
             if (v <= 0) continue;
             const list = refIndex[m] || (refIndex[m] = []);
-            list.push({ f: p.freq >>> 0, lf: p.freq, lv: Math.log(v) });
+            list.push({ f: p.freq >>> 0, lf: p.freq, lv: Math.log(v), phase: (p.phase !== undefined) ? p.phase : 0.0 });
         }
         for (const m in refIndex) refIndex[m].sort((a, b) => a.f - b.f);
         refDirty = false;
@@ -446,6 +465,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const a = list[lo], b = list[hi];
         const t = (lf - a.lf) / (b.lf - a.lf);
         return a.lv + t * (b.lv - a.lv);
+    }
+
+    function getRefPhaseAt(freq, mode) {
+        ensureRefIndex();
+        const m = normalizeMode(mode);
+        const list = refIndex && refIndex[m];
+        if (!list || list.length === 0) return 0.0;
+        const lf = freq;
+        const first = list[0], last = list[list.length - 1];
+        if (lf <= first.lf) return first.phase || 0.0;
+        if (lf >= last.lf) return last.phase || 0.0;
+        let lo = 0, hi = list.length - 1;
+        while (hi - lo > 1) {
+            const mid = (lo + hi) >> 1;
+            if (list[mid].lf < lf) lo = mid; else hi = mid;
+        }
+        const a = list[lo], b = list[hi];
+        const t = (lf - a.lf) / (b.lf - a.lf);
+        return (a.phase || 0.0) + t * ((b.phase || 0.0) - (a.phase || 0.0));
     }
 
     function refSpan(mode) {
@@ -480,16 +518,48 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 db = 20 * Math.log10(dutSig / maxSig);
             }
+
+            // Phase calculation
+            const rawPhase = (d.phase !== undefined && isFinite(d.phase)) ? d.phase : 0.0;
+            const refPhase = getRefPhaseAt(d.freq >>> 0, m);
+            let relPhase = (dutSig <= 3) ? 0.0 : (rawPhase - refPhase);
+            while (relPhase > 180.0) relPhase -= 360.0;
+            while (relPhase < -180.0) relPhase += 360.0;
+
             if (isFinite(db)) {
                 results.push({
                     freq: d.freq >>> 0,
                     mode: m,
                     ref: refLog !== null ? Math.round(Math.exp(refLog)) : 0,
                     dut: rawV,
-                    db: db
+                    db: db,
+                    rawPhase: rawPhase,
+                    phase: relPhase,
+                    phaseUnwrapped: relPhase
                 });
             }
         }
+
+        // Unwrap phase across frequency points for smooth continuous curve
+        if (results.length > 1) {
+            let prev = results[0].phase;
+            let offset = 0;
+            results[0].phaseUnwrapped = prev;
+            for (let i = 1; i < results.length; i++) {
+                let cur = results[i].phase + offset;
+                let diff = cur - prev;
+                if (diff > 180.0) {
+                    const steps = Math.round(diff / 360.0);
+                    offset -= 360.0 * steps;
+                } else if (diff < -180.0) {
+                    const steps = Math.round(-diff / 360.0);
+                    offset += 360.0 * steps;
+                }
+                results[i].phaseUnwrapped = results[i].phase + offset;
+                prev = results[i].phaseUnwrapped;
+            }
+        }
+
         return results;
     }
 
@@ -505,7 +575,9 @@ document.addEventListener('DOMContentLoaded', () => {
             mode: normalizeMode(p.mode),
             ref: 0,
             dut: p.value >>> 0,
-            db: 20 * Math.log10(Math.max(1, p.value >>> 0) / maxV)
+            db: 20 * Math.log10(Math.max(1, p.value >>> 0) / maxV),
+            phase: p.phase || 0.0,
+            phaseUnwrapped: p.phase || 0.0
         }));
     }
 
@@ -525,7 +597,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!rangeEl) return;
         parseConfig();
         const overStr = (state.oversample === 0) ? '1x' : `${state.oversample}x`;
-        const measuredStr = (state.dut && state.dut.length > 0) ? ` · (${state.dut.length} measured)` : '';
+        let measuredStr = '';
+        if (state.dut && state.dut.length > 0) {
+            const gainPts = state.dut.filter(p => p.value !== undefined).length;
+            const phasePts = state.dut.filter(p => p.phase !== undefined && isFinite(p.phase)).length;
+            measuredStr = ` · Measured: Gain ${gainPts} pts, Phase ${phasePts} pts`;
+        }
         rangeEl.innerText = `Range: ${fmtHz(state.fmin)} → ${fmtHz(state.fmax)} · ${state.n} pts (${overStr} oversample)${measuredStr}`;
     }
 
@@ -551,7 +628,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = canvas.getContext('2d');
         const W = canvas.parentElement ? canvas.parentElement.clientWidth : (canvas.clientWidth || 600);
         const H = canvas.parentElement ? canvas.parentElement.clientHeight : (canvas.clientHeight || 300);
-        const padL = 52, padR = 24, padT = 24, padB = 34;
+        
+        const isBoth = (state.viewMode === 'both');
+        const isPhaseOnly = (state.viewMode === 'phase');
+        const isGainOnly = (state.viewMode === 'gain' || !state.viewMode);
+
+        const padL = 52, padR = isBoth ? 52 : 24, padT = 24, padB = 34;
         const plotW = Math.max(10, W - padL - padR);
         const plotH = Math.max(10, H - padT - padB);
 
@@ -566,22 +648,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Determine Y-axis dB bounds
         let dbVals = [];
+        let phaseVals = [];
         for (const p of data) {
             if (isFinite(p.db)) dbVals.push(p.db);
+            const pv = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped : p.phase;
+            if (isFinite(pv)) phaseVals.push(pv);
         }
-        let yMin = dbVals.length > 0 ? Math.min(...dbVals.concat([0])) : -50;
-        let yMax = dbVals.length > 0 ? Math.max(...dbVals.concat([0])) : 6;
-        if (!isFinite(yMin) || !isFinite(yMax) || yMax - yMin < 6) {
-            const m = isFinite(yMin) ? yMin : -6;
-            yMin = Math.min(m, -3) - 2;
-            yMax = Math.max(yMax, 0) + 2;
+        let yMinDb = dbVals.length > 0 ? Math.min(...dbVals.concat([0])) : -50;
+        let yMaxDb = dbVals.length > 0 ? Math.max(...dbVals.concat([0])) : 6;
+        if (!isFinite(yMinDb) || !isFinite(yMaxDb) || yMaxDb - yMinDb < 6) {
+            const m = isFinite(yMinDb) ? yMinDb : -6;
+            yMinDb = Math.min(m, -3) - 2;
+            yMaxDb = Math.max(yMaxDb, 0) + 2;
         }
-        yMin = Math.floor(yMin - 1);
-        yMax = Math.ceil(yMax + 1);
+        yMinDb = Math.floor(yMinDb - 1);
+        yMaxDb = Math.ceil(yMaxDb + 1);
+
+        // Determine Phase Y-axis bounds (degrees)
+        let yMinPhase = -180;
+        let yMaxPhase = 180;
+        if (phaseVals.length > 0) {
+            let minP = Math.min(...phaseVals);
+            let maxP = Math.max(...phaseVals);
+            if (minP < -180 || maxP > 180) {
+                const span = maxP - minP;
+                const step = span > 720 ? 180 : (span > 360 ? 90 : 45);
+                yMinPhase = Math.floor((minP - 15) / step) * step;
+                yMaxPhase = Math.ceil((maxP + 15) / step) * step;
+            }
+        }
+
+        // Align 0 dB and 0 deg to the exact same vertical fraction on canvas when both axes are shown
+        if (isBoth) {
+            const rDb = Math.max(0.05, Math.min(0.95, yMaxDb / (yMaxDb - yMinDb)));
+            const rPhase = Math.max(0.05, Math.min(0.95, yMaxPhase / (yMaxPhase - yMinPhase)));
+            const r = Math.max(rDb, rPhase);
+
+            if (rDb < r && (1 - r) > 0.001) {
+                yMaxDb = Math.ceil((-yMinDb * r) / (1 - r));
+            } else if (rDb > r && r > 0.001) {
+                yMinDb = Math.floor((-yMaxDb * (1 - r)) / r);
+            }
+
+            if (rPhase < r && (1 - r) > 0.001) {
+                yMaxPhase = Math.ceil((-yMinPhase * r) / (1 - r));
+            } else if (rPhase > r && r > 0.001) {
+                yMinPhase = Math.floor((-yMaxPhase * (1 - r)) / r);
+            }
+        }
 
         // Coordinate transforms
         const X = (f) => padL + ((f - fmin) / fSpan) * plotW;
-        const Y = (db) => padT + ((yMax - db) / (yMax - yMin)) * plotH;
+        const Y_db = (db) => padT + ((yMaxDb - db) / (yMaxDb - yMinDb)) * plotH;
+        const Y_phase = (deg) => padT + ((yMaxPhase - deg) / (yMaxPhase - yMinPhase)) * plotH;
 
         // ---- 1. Vertical Frequency Grid & Ticks (Linear) ----
         ctx.font = '10px JetBrains Mono, monospace';
@@ -621,32 +740,76 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // ---- 2. Horizontal dB Grid Lines ----
-        const yStep = niceStep(yMax - yMin);
-        for (let v = Math.floor(yMin / yStep) * yStep; v <= yMax + 1e-9; v += yStep) {
-            const y = Y(v);
-            if (y < padT || y > padT + plotH) continue;
-            ctx.strokeStyle = (Math.abs(v) < 1e-6) ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.12)';
-            ctx.beginPath();
-            ctx.moveTo(padL, y);
-            ctx.lineTo(padL + plotW, y);
-            ctx.stroke();
-            ctx.fillStyle = '#94a3b8';
-            ctx.fillText(v.toFixed(0) + ' dB', 6, y + 3);
+        // ---- 2. Horizontal Grid Lines & Y-Axes ----
+        if (!isPhaseOnly) {
+            // Left Axis: Gain in dB
+            const yStep = niceStep(yMaxDb - yMinDb);
+            for (let v = Math.floor(yMinDb / yStep) * yStep; v <= yMaxDb + 1e-9; v += yStep) {
+                const y = Y_db(v);
+                if (y < padT || y > padT + plotH) continue;
+                ctx.strokeStyle = (Math.abs(v) < 1e-6) ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.12)';
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(padL + plotW, y);
+                ctx.stroke();
+                ctx.fillStyle = '#38bdf8';
+                ctx.fillText(v.toFixed(0) + ' dB', 6, y + 3);
+            }
+
+            // Highlight 0 dB Reference line
+            const y0 = Y_db(0);
+            if (y0 >= padT && y0 <= padT + plotH) {
+                ctx.strokeStyle = 'rgba(34, 197, 94, 0.75)';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(padL, y0);
+                ctx.lineTo(padL + plotW, y0);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#4ade80';
+                ctx.fillText(isBoth ? '0 dB / 0°' : '0 dB', padL + plotW - (isBoth ? 60 : 32), y0 - 4);
+            }
         }
 
-        // Highlight 0 dB Reference line
-        const y0 = Y(0);
-        if (y0 >= padT && y0 <= padT + plotH) {
-            ctx.strokeStyle = 'rgba(34, 197, 94, 0.75)';
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(padL, y0);
-            ctx.lineTo(padL + plotW, y0);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.fillStyle = '#4ade80';
-            ctx.fillText('0 dB', padL + plotW - 32, y0 - 4);
+        if (isPhaseOnly) {
+            // Left Axis: Phase in Degrees
+            const span = yMaxPhase - yMinPhase;
+            const phaseStep = span > 720 ? 180 : (span > 360 ? 90 : 45);
+            for (let v = yMinPhase; v <= yMaxPhase + 1e-9; v += phaseStep) {
+                const y = Y_phase(v);
+                if (y < padT || y > padT + plotH) continue;
+                ctx.strokeStyle = (Math.abs(v) < 1e-6) ? 'rgba(251, 191, 36, 0.35)' : 'rgba(251, 191, 36, 0.12)';
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(padL + plotW, y);
+                ctx.stroke();
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillText(v.toFixed(0) + '°', 6, y + 3);
+            }
+
+            // Highlight 0 deg Reference line
+            const yp0 = Y_phase(0);
+            if (yp0 >= padT && yp0 <= padT + plotH) {
+                ctx.strokeStyle = 'rgba(34, 197, 94, 0.75)';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(padL, yp0);
+                ctx.lineTo(padL + plotW, yp0);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#4ade80';
+                ctx.fillText('0°', padL + plotW - 28, yp0 - 4);
+            }
+        } else if (isBoth) {
+            // Right Axis: Phase in Degrees for Bode Plot
+            const span = yMaxPhase - yMinPhase;
+            const phaseStep = span > 720 ? 180 : (span > 360 ? 90 : 45);
+            for (let v = yMinPhase; v <= yMaxPhase + 1e-9; v += phaseStep) {
+                const y = Y_phase(v);
+                if (y < padT || y > padT + plotH) continue;
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillText(v.toFixed(0) + '°', padL + plotW + 8, y + 3);
+            }
         }
 
         // Outer plot frame
@@ -654,88 +817,132 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.lineWidth = 1;
         ctx.strokeRect(padL, padT, plotW, plotH);
 
-        // ---- 3. Draw Response Curve (Clean line, NO gradient fill, NO glow) ----
+        // ---- 3. Draw Curves ----
         if (data.length >= 2) {
             const sortedData = data.slice().sort((a, b) => a.freq - b.freq);
 
-            // Clean solid stroke line (No fill under the curve)
-            ctx.strokeStyle = '#38bdf8';
-            ctx.lineWidth = 2.0;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            let started = false;
-            for (const p of sortedData) {
-                const x = X(p.freq);
-                const y = Y(p.db);
-                if (x < padL - 10 || x > padL + plotW + 10) continue;
-                if (!started) {
-                    ctx.moveTo(x, y);
-                    started = true;
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            ctx.stroke();
-
-            // Point dots
-            if (sortedData.length <= 512) {
+            // A. Draw Gain Curve (if Gain or Both)
+            if (!isPhaseOnly) {
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 2.0;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                let started = false;
                 for (const p of sortedData) {
                     const x = X(p.freq);
-                    const y = Y(p.db);
-                    if (x < padL || x > padL + plotW) continue;
-                    ctx.fillStyle = '#38bdf8';
-                    ctx.beginPath();
-                    ctx.arc(x, y, 3, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#0b132b';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
+                    const y = Y_db(p.db);
+                    if (x < padL - 10 || x > padL + plotW + 10) continue;
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Point dots
+                if (sortedData.length <= 512) {
+                    for (const p of sortedData) {
+                        const x = X(p.freq);
+                        const y = Y_db(p.db);
+                        if (x < padL || x > padL + plotW) continue;
+                        ctx.fillStyle = '#38bdf8';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#0b132b';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+
+                // Cutoff frequency detection & line
+                if (chkShowFc && chkShowFc.checked) {
+                    let maxDb = -Infinity;
+                    for (const p of sortedData) {
+                        if (p.db > maxDb) maxDb = p.db;
+                    }
+                    const cutoffDb = maxDb - 3;
+                    const yCut = Y_db(cutoffDb);
+                    if (yCut >= padT && yCut <= padT + plotH) {
+                        ctx.strokeStyle = '#f472b6';
+                        ctx.setLineDash([4, 4]);
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.moveTo(padL, yCut);
+                        ctx.lineTo(padL + plotW, yCut);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.fillStyle = '#f472b6';
+                        ctx.fillText('-3 dB', padL + 6, yCut - 4);
+                    }
+
+                    const cutoffFreq = findCutoff(sortedData, maxDb);
+                    if (cutoffFreq && cutoffFreq >= fmin && cutoffFreq <= fmax) {
+                        const xCut = X(cutoffFreq);
+                        ctx.strokeStyle = '#f472b6';
+                        ctx.setLineDash([2, 2]);
+                        ctx.beginPath();
+                        ctx.moveTo(xCut, padT);
+                        ctx.lineTo(xCut, padT + plotH);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+
+                        ctx.fillStyle = '#f472b6';
+                        ctx.font = 'bold 10px JetBrains Mono, monospace';
+                        ctx.fillText(`Fc (-3dB) ≈ ${fmtHz(cutoffFreq)}`, xCut + 6, yCut - 6);
+                    }
                 }
             }
 
-            // Cutoff frequency detection & line (toggleable)
-            if (chkShowFc && chkShowFc.checked) {
-            let maxDb = -Infinity;
-            for (const p of sortedData) {
-                if (p.db > maxDb) maxDb = p.db;
-            }
-            const cutoffDb = maxDb - 3;
-            const yCut = Y(cutoffDb);
-            if (yCut >= padT && yCut <= padT + plotH) {
-                ctx.strokeStyle = '#f472b6';
-                ctx.setLineDash([4, 4]);
-                ctx.lineWidth = 1;
+            // B. Draw Phase Curve (if Phase or Both)
+            if (!isGainOnly) {
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 2.0;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                if (isBoth) ctx.setLineDash([5, 3]);
                 ctx.beginPath();
-                ctx.moveTo(padL, yCut);
-                ctx.lineTo(padL + plotW, yCut);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.fillStyle = '#f472b6';
-                ctx.fillText('-3 dB', padL + 6, yCut - 4);
-            }
-
-            const cutoffFreq = findCutoff(sortedData, maxDb);
-            if (cutoffFreq && cutoffFreq >= fmin && cutoffFreq <= fmax) {
-                const xCut = X(cutoffFreq);
-                ctx.strokeStyle = '#f472b6';
-                ctx.setLineDash([2, 2]);
-                ctx.beginPath();
-                ctx.moveTo(xCut, padT);
-                ctx.lineTo(xCut, padT + plotH);
+                let startedP = false;
+                for (const p of sortedData) {
+                    const x = X(p.freq);
+                    const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped : (p.phase || 0.0);
+                    const y = Y_phase(phaseVal);
+                    if (x < padL - 10 || x > padL + plotW + 10) continue;
+                    if (!startedP) {
+                        ctx.moveTo(x, y);
+                        startedP = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
                 ctx.stroke();
                 ctx.setLineDash([]);
 
-                ctx.fillStyle = '#f472b6';
-                ctx.font = 'bold 10px JetBrains Mono, monospace';
-                ctx.fillText(`Fc (-3dB) ≈ ${fmtHz(cutoffFreq)}`, xCut + 6, yCut - 6);
-            }
+                // Point dots for Phase
+                if (sortedData.length <= 512) {
+                    for (const p of sortedData) {
+                        const x = X(p.freq);
+                        const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped : (p.phase || 0.0);
+                        const y = Y_phase(phaseVal);
+                        if (x < padL || x > padL + plotW) continue;
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.beginPath();
+                        ctx.arc(x, y, isBoth ? 2.5 : 3, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#0b132b';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
             }
         } else if (data.length === 0 && !state.busy) {
-            // Idle State: informative ready prompt
+            // Idle State
             ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-            const boxW = Math.min(420, plotW - 20);
-            const boxH = 54;
+            const boxW = Math.min(440, plotW - 20);
+            const boxH = 56;
             const boxX = padL + (plotW - boxW) / 2;
             const boxY = padT + (plotH - boxH) / 2;
             ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -746,19 +953,20 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillStyle = '#38bdf8';
             ctx.font = 'bold 12px JetBrains Mono, monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(`Frequency Response · Planned ${fmtHz(fmin)} → ${fmtHz(fmax)}`, padL + plotW / 2, boxY + 22);
+            const titleStr = isPhaseOnly ? 'Phase Response' : (isBoth ? 'Bode Plot (Gain & Phase)' : 'Frequency Response');
+            ctx.fillText(`${titleStr} · Planned ${fmtHz(fmin)} → ${fmtHz(fmax)}`, padL + plotW / 2, boxY + 22);
 
             const genPin = (state.mode === 'sine') ? 'PB5 (DAC)' : 'PA8 (PWM Meander)';
             ctx.fillStyle = '#94a3b8';
             ctx.font = '11px JetBrains Mono, monospace';
-            ctx.fillText(`Connect DUT to ${genPin} & PB0 (ADC) · Click ▶ Start Sweep`, padL + plotW / 2, boxY + 40);
+            ctx.fillText(`Connect DUT to ${genPin} & PB0 (ADC) · Click Sweep`, padL + plotW / 2, boxY + 42);
             ctx.textAlign = 'left';
         }
 
         // ---- 4. Hover Crosshair & Tooltip ----
         if (hoverPoint) {
             const hx = X(hoverPoint.freq);
-            const hy = Y(hoverPoint.db);
+            const hy = !isPhaseOnly ? Y_db(hoverPoint.db) : Y_phase(hoverPoint.phase);
 
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.setLineDash([2, 2]);
@@ -775,11 +983,22 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.beginPath();
             ctx.arc(hx, hy, 5, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = '#38bdf8';
+            ctx.strokeStyle = !isPhaseOnly ? '#38bdf8' : '#fbbf24';
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            const tipText = `${fmtHz(hoverPoint.freq)} · ${hoverPoint.db >= 0 ? '+' : ''}${hoverPoint.db.toFixed(1)} dB (raw ${hoverPoint.dut})`;
+            let tipText;
+            const pv = (hoverPoint.phaseUnwrapped !== undefined) ? hoverPoint.phaseUnwrapped : hoverPoint.phase;
+            const pStr = (pv !== undefined) ? `${pv >= 0 ? '+' : ''}${pv.toFixed(1)}°` : '--°';
+            const gStr = `${hoverPoint.db >= 0 ? '+' : ''}${hoverPoint.db.toFixed(1)} dB`;
+            if (isPhaseOnly) {
+                tipText = `${fmtHz(hoverPoint.freq)} · Phase: ${pStr}`;
+            } else if (isBoth) {
+                tipText = `${fmtHz(hoverPoint.freq)} · Gain: ${gStr} | Phase: ${pStr}`;
+            } else {
+                tipText = `${fmtHz(hoverPoint.freq)} · ${gStr} (raw ${hoverPoint.dut})`;
+            }
+
             ctx.font = 'bold 11px JetBrains Mono, monospace';
             const tipW = ctx.measureText(tipText).width + 16;
             const tipH = 24;
@@ -789,12 +1008,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tipY < padT) tipY = hy + 10;
 
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-            ctx.strokeStyle = '#38bdf8';
+            ctx.strokeStyle = !isPhaseOnly ? '#38bdf8' : '#fbbf24';
             ctx.lineWidth = 1;
             ctx.fillRect(tipX, tipY, tipW, tipH);
             ctx.strokeRect(tipX, tipY, tipW, tipH);
 
-            ctx.fillStyle = '#38bdf8';
+            ctx.fillStyle = !isPhaseOnly ? '#38bdf8' : '#fbbf24';
             ctx.fillText(tipText, tipX + 8, tipY + 16);
         }
 
@@ -1219,16 +1438,18 @@ document.addEventListener('DOMContentLoaded', () => {
             frCalibZeroVal.innerText = (state.zero.diode > 0) ? state.zero.diode : '0';
         }
         if (frCalibRefVal) {
-            const cnt = { [FR_MODE_DIRECT]: 0, [FR_MODE_DIODE]: 0, [FR_MODE_SINE]: 0 };
+            const cntGain = { [FR_MODE_DIRECT]: 0, [FR_MODE_DIODE]: 0, [FR_MODE_SINE]: 0 };
+            const cntPhase = { [FR_MODE_DIRECT]: 0, [FR_MODE_DIODE]: 0, [FR_MODE_SINE]: 0 };
             const isDef = { [FR_MODE_DIRECT]: true, [FR_MODE_DIODE]: true, [FR_MODE_SINE]: true };
             for (const p of state.ref) {
                 const m = normalizeMode(p.mode);
-                cnt[m] = (cnt[m] || 0) + 1;
+                if (p.value !== undefined) cntGain[m] = (cntGain[m] || 0) + 1;
+                if (p.phase !== undefined && isFinite(p.phase)) cntPhase[m] = (cntPhase[m] || 0) + 1;
                 if (!p.isDefault) isDef[m] = false;
             }
-            frCalibRefVal.innerText = 'Sine:' + cnt[FR_MODE_SINE] + (isDef[FR_MODE_SINE] ? ' (Def)' : ' (Cal)')
-                + ' | Direct:' + cnt[FR_MODE_DIRECT] + (isDef[FR_MODE_DIRECT] ? ' (Def)' : ' (Cal)')
-                + ' | Diode:' + cnt[FR_MODE_DIODE] + (isDef[FR_MODE_DIODE] ? ' (Def)' : ' (Cal)');
+            frCalibRefVal.innerText = `Sine: Gain ${cntGain[FR_MODE_SINE]} / Phase ${cntPhase[FR_MODE_SINE]} pts (${isDef[FR_MODE_SINE] ? 'Def' : 'Cal'})`
+                + ` | Direct: Gain ${cntGain[FR_MODE_DIRECT]} / Phase ${cntPhase[FR_MODE_DIRECT]} pts (${isDef[FR_MODE_DIRECT] ? 'Def' : 'Cal'})`
+                + ` | Diode: Gain ${cntGain[FR_MODE_DIODE]} pts (${isDef[FR_MODE_DIODE] ? 'Def' : 'Cal'})`;
         }
         if (frCalibStatus) {
             const curM = chooseMode(state.fmin);
@@ -1329,6 +1550,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 stepDesc.style.display = 'block';
                 stepDesc.innerHTML = getStepDesc(currentStep);
             }
+            const targetRow = document.getElementById('frModalTargetRow');
+            if (targetRow) {
+                targetRow.style.display = isDiode ? 'none' : 'flex';
+            }
             const pointsRow = document.getElementById('frModalPointsRow');
             if (pointsRow) {
                 pointsRow.style.display = 'flex';
@@ -1404,6 +1629,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Reference Sweep for Sine, Direct, or Diode
                     btnNext.disabled = true;
                     if (btnCancel) btnCancel.disabled = true;
+                    const targetRow = document.getElementById('frModalTargetRow');
+                    if (targetRow) targetRow.style.display = 'none';
                     const pointsRow = document.getElementById('frModalPointsRow');
                     if (pointsRow) pointsRow.style.display = 'none';
                     const selCalOver = document.getElementById('frCalibOversample');
@@ -1434,13 +1661,46 @@ document.addEventListener('DOMContentLoaded', () => {
                                 freq: resp.freq >>> 0,
                                 mode: calModeNum,
                                 value: resp.value >>> 0,
+                                phase: (resp.phase !== undefined && isFinite(resp.phase)) ? resp.phase : 0.0,
                                 isDefault: false
                             });
                         }
 
                         if (fresh.length < 2) throw new Error('Calibration incomplete');
 
-                        state.ref = state.ref.filter(p => normalizeMode(p.mode) !== calModeNum).concat(fresh);
+                        const calTargetSel = document.getElementById('frCalibTarget');
+                        const calTarget = calTargetSel ? calTargetSel.value : 'both';
+
+                        if (calTarget === 'both') {
+                            state.ref = state.ref.filter(p => normalizeMode(p.mode) !== calModeNum).concat(fresh);
+                        } else {
+                            const existingList = state.ref.filter(p => normalizeMode(p.mode) === calModeNum);
+                            const existingMap = new Map();
+                            for (const r of existingList) existingMap.set(r.freq, r);
+                            const merged = [];
+                            for (const p of fresh) {
+                                const ex = existingMap.get(p.freq);
+                                if (calTarget === 'gain') {
+                                    merged.push({
+                                        freq: p.freq,
+                                        mode: calModeNum,
+                                        value: p.value,
+                                        phase: (ex && ex.phase !== undefined) ? ex.phase : p.phase,
+                                        isDefault: false
+                                    });
+                                } else if (calTarget === 'phase') {
+                                    merged.push({
+                                        freq: p.freq,
+                                        mode: calModeNum,
+                                        value: (ex && ex.value !== undefined) ? ex.value : p.value,
+                                        phase: p.phase,
+                                        isDefault: false
+                                    });
+                                }
+                            }
+                            state.ref = state.ref.filter(p => normalizeMode(p.mode) !== calModeNum).concat(merged);
+                        }
+
                         invalidateRefIndex();
                         state.dut = [];
                         saveCal();
@@ -1451,24 +1711,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (stepDesc) stepDesc.style.display = 'none';
 
                         if (resultsEl) {
+                            const targetLabel = (calTarget === 'gain') ? 'Gain Only (АЧХ)' : ((calTarget === 'phase') ? 'Phase Only (ФЧХ)' : 'Gain & Phase (Both)');
                             let detailsHtml = '';
                             if (calModeNum === FR_MODE_SINE) {
                                 detailsHtml = `
-                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Sine FR Calibration Complete!</div>
+                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Sine FR/PR Calibration Complete!</div>
                                     <div>• Mode: <strong>Sine (10 Hz – 1.00 MHz)</strong></div>
+                                    <div>• Calibrated Target: <strong>${targetLabel}</strong></div>
                                     <div>• Generator Output: <strong>PB5 (Sigma-Delta DAC)</strong></div>
                                     <div>• Input: <strong>PB0 (ADC Goertzel Lock-in)</strong></div>
-                                    <div>• Calibrated Reference Points: <strong>${fresh.length} points</strong></div>
-                                    <div style="margin-top: 8px; color: #38bdf8; font-size: 11px;">Universal calibration stored. Connect your DUT between PB5 and PB0 and press "Start Sweep"!</div>
+                                    <div>• Reference Baselines: <strong>Gain 0.0 dB / Phase 0.0°</strong></div>
+                                    <div>• Calibrated Points: <strong>Gain: ${fresh.length} pts, Phase: ${fresh.length} pts</strong></div>
+                                    <div style="margin-top: 8px; color: #38bdf8; font-size: 11px;">Calibration stored. Connect your DUT between PB5 and PB0 and click "Gain Sweep", "Phase Sweep", or "Bode (Both)"!</div>
                                 `;
                             } else if (calModeNum === FR_MODE_DIRECT) {
                                 detailsHtml = `
-                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Direct FR Calibration Complete!</div>
+                                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 8px;">Universal Direct FR/PR Calibration Complete!</div>
                                     <div>• Mode: <strong>Direct Meander (10 Hz – 1.00 MHz)</strong></div>
+                                    <div>• Calibrated Target: <strong>${targetLabel}</strong></div>
                                     <div>• Generator Output: <strong>PA8 (TIM1_CH1 Meander 50%)</strong></div>
                                     <div>• Input: <strong>PB0 (ADC Goertzel)</strong></div>
-                                    <div>• Calibrated Reference Points: <strong>${fresh.length} points</strong></div>
-                                    <div style="margin-top: 8px; color: #38bdf8; font-size: 11px;">Universal calibration stored. Connect your DUT between PA8 and PB0 and press "Start Sweep"!</div>
+                                    <div>• Reference Baselines: <strong>Gain 0.0 dB / Phase 0.0°</strong></div>
+                                    <div>• Calibrated Points: <strong>Gain: ${fresh.length} pts, Phase: ${fresh.length} pts</strong></div>
+                                    <div style="margin-top: 8px; color: #38bdf8; font-size: 11px;">Calibration stored. Connect your DUT between PA8 and PB0 and click "Gain Sweep", "Phase Sweep", or "Bode (Both)"!</div>
                                 `;
                             } else {
                                 detailsHtml = `
@@ -1545,7 +1810,63 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    if (btnSweep) btnSweep.addEventListener('click', () => startSweep());
+    function setViewMode(mode) {
+        state.viewMode = mode;
+        if (btnViewGain) btnViewGain.classList.toggle('active', mode === 'gain');
+        if (btnViewPhase) btnViewPhase.classList.toggle('active', mode === 'phase');
+        if (btnViewBoth) btnViewBoth.classList.toggle('active', mode === 'both');
+
+        if (legendGain) legendGain.style.display = (mode === 'phase') ? 'none' : 'inline-flex';
+        if (legendPhase) legendPhase.style.display = (mode === 'gain') ? 'none' : 'inline-flex';
+
+        if (lblPlotTitle) {
+            if (mode === 'gain') lblPlotTitle.innerText = 'Frequency Response (Gain)';
+            else if (mode === 'phase') lblPlotTitle.innerText = 'Phase Response (Phase Shift)';
+            else lblPlotTitle.innerText = 'Bode Plot (Gain & Phase)';
+        }
+
+        renderCanvas();
+    }
+
+    if (btnSweep) {
+        btnSweep.addEventListener('click', () => {
+            setViewMode('gain');
+            startSweep();
+        });
+    }
+
+    if (btnSweepPhase) {
+        btnSweepPhase.addEventListener('click', () => {
+            parseConfig();
+            if (state.mode === 'diode') {
+                if (selMode) {
+                    selMode.value = 'sine';
+                    selMode.dispatchEvent(new Event('change'));
+                }
+            }
+            setViewMode('phase');
+            startSweep();
+        });
+    }
+
+    if (btnSweepBode) {
+        btnSweepBode.addEventListener('click', () => {
+            parseConfig();
+            if (state.mode === 'diode') {
+                if (selMode) {
+                    selMode.value = 'sine';
+                    selMode.dispatchEvent(new Event('change'));
+                }
+            }
+            setViewMode('both');
+            startSweep();
+        });
+    }
+
+    if (btnViewGain) btnViewGain.addEventListener('click', () => setViewMode('gain'));
+    if (btnViewPhase) btnViewPhase.addEventListener('click', () => setViewMode('phase'));
+    if (btnViewBoth) btnViewBoth.addEventListener('click', () => setViewMode('both'));
+
     if (btnFrCalibToolbar) btnFrCalibToolbar.addEventListener('click', () => runAutoCalibration(state.mode));
     if (btnStop) btnStop.addEventListener('click', stopSweep);
     if (btnCalibDiode) btnCalibDiode.addEventListener('click', () => runAutoCalibration('diode'));
@@ -1577,13 +1898,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 frPacketBuffer = newBuf;
 
                 while (frPacketBuffer.length >= 16) {
-                    if (frPacketBuffer[0] === PKT_FR_DATA && frPacketBuffer[1] === 13 && frPacketBuffer[2] === 0) {
+                    const pktType = frPacketBuffer[0];
+                    const payloadLen = frPacketBuffer[1];
+                    const payloadLenHi = frPacketBuffer[2];
+
+                    if (pktType === PKT_FR_DATA && (payloadLen === 13 || payloadLen === 15) && payloadLenHi === 0) {
+                        const pktTotalLen = payloadLen + 3;
+                        if (frPacketBuffer.length < pktTotalLen) break;
+
                         const freq = (frPacketBuffer[3] | (frPacketBuffer[4] << 8) | (frPacketBuffer[5] << 16) | (frPacketBuffer[6] << 24)) >>> 0;
                         const mode = frPacketBuffer[7];
                         const value = (frPacketBuffer[8] | (frPacketBuffer[9] << 8) | (frPacketBuffer[10] << 16) | (frPacketBuffer[11] << 24)) >>> 0;
                         const n = (frPacketBuffer[12] | (frPacketBuffer[13] << 8)) >>> 0;
                         const rate = (frPacketBuffer[14] | (frPacketBuffer[15] << 8)) >>> 0;
-                        frPacketBuffer = frPacketBuffer.slice(16);
+
+                        let phase = 0.0;
+                        if (payloadLen >= 15) {
+                            let rawPhase = (frPacketBuffer[16] | (frPacketBuffer[17] << 8));
+                            // Sign extend 16-bit to signed integer
+                            rawPhase = (rawPhase << 16) >> 16;
+                            phase = rawPhase / 100.0; // convert centi-degrees to degrees
+                        }
+
+                        frPacketBuffer = frPacketBuffer.slice(pktTotalLen);
 
                         if (!pendingResolve) continue;
                         if (pendingFreq !== null && pendingFreq !== freq) continue;
@@ -1592,7 +1929,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const resolve = pendingResolve;
                         pendingResolve = null;
                         pendingFreq = null;
-                        const resp = { freq, mode, value, n, rate };
+                        const resp = { freq, mode, value, phase, n, rate };
                         if (window.MTLogger) window.MTLogger.log('fr:point', 'FR data', resp);
                         resolve(resp);
                     } else {

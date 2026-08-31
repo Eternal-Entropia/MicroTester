@@ -453,21 +453,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 const XLs = 2.0 * Math.PI * xlFreq * L_henry;
                 let xlStr = `X_L: ${formatResistance(XLs * 100)} @ ${xlFreq} Hz`;
 
-                // Estimated Self-Resonant Frequency (SRF / f_res) with parasitic C ~ 30 pF
-                let fRes = 1.0 / (2.0 * Math.PI * Math.sqrt(L_henry * 30.0e-12));
+                // Estimated Self-Resonant Frequency (SRF / f_res) with realistic parasitic Cp model
+                // High-L multi-layer chokes (>10 mH) have Cp ~ 250..350 pF; small RF coils have Cp ~ 5..15 pF
+                let cp_farad = 15.0e-12;
+                if (L_henry >= 0.010) { // >= 10 mH
+                    cp_farad = 300.0e-12;
+                } else if (L_henry >= 0.001) { // 1 mH .. 10 mH
+                    cp_farad = 100.0e-12;
+                } else if (L_henry >= 0.0001) { // 100 uH .. 1 mH
+                    cp_farad = 35.0e-12;
+                } else {
+                    cp_farad = 15.0e-12;
+                }
+                let fRes = 1.0 / (2.0 * Math.PI * Math.sqrt(L_henry * cp_farad));
                 let fResStr = (fRes >= 1000000) ? (fRes / 1000000).toFixed(2) + ' MHz' : (fRes >= 1000) ? (fRes / 1000).toFixed(1) + ' kHz' : fRes.toFixed(0) + ' Hz';
 
-                let testFreqStr = (freqHz >= 1000000) ? (freqHz / 1000000).toFixed(0) + ' MHz' : (freqHz >= 1000) ? (freqHz / 1000).toFixed(0) + ' kHz' : freqHz + ' Hz';
+                let rDcStr = (Rdc2 < 0.05) ? '< 0.05 Ω' : `${Rdc2.toFixed(2)} Ω`;
+                let fKHz = xlFreq / 1000.0;
+                let rac = Math.max(0.01, Rdc2 * (1.0 + 0.15 * Math.sqrt(fKHz)));
+                let Q = XLs / rac;
+                let qStr = (Q >= 100) ? '≥100' : (Q < 0.1 ? '<0.1' : Q.toFixed(1));
 
-                if (Rdc2 < 0.05) {
-                    secondary = `R_dc: < 0.1 Ω  |  ${xlStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
-                } else {
-                    let fKHz = xlFreq / 1000.0;
-                    let rac = Rdc2 * (1.0 + 0.15 * Math.sqrt(fKHz));
-                    let Q = XLs / rac;
-                    let qStr = (Q >= 100) ? Q.toFixed(0) : Q.toFixed(1);
-                    secondary = `R_dc: ${Rdc2.toFixed(2)} Ω  |  ${xlStr}  |  Q = ${qStr}  |  f_res ≈ ${fResStr} (@ ${testFreqStr})`;
-                }
+                secondary = `R_dc: ${rDcStr}  |  ${xlStr}  |  Q ≈ ${qStr} @ ${xlFreq} Hz  |  f_res ≈ ${fResStr}`;
                 probeMap = `${probeLabels[r.pinA]} ⟷ ${probeLabels[r.pinB]}`;
                 statusEl.innerText = 'Component identified';
                 statusEl.className = 'comp-status success';

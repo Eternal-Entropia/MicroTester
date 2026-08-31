@@ -281,11 +281,12 @@ void loop() {
                       ((uint32_t)payload[3] << 24);
       uint8_t mode = payload[4]; // outer guard is len >= 5, so payload[4] is always valid
       uint32_t value = 0;
-      bool ok = fr_measure_point(freq, mode, &value);
+      int16_t phase_cdeg = 0;
+      bool ok = fr_measure_point(freq, mode, &value, &phase_cdeg);
 
-      uint8_t packet[16];
+      uint8_t packet[18];
       packet[0] = PKT_FR_DATA;
-      packet[1] = 13;
+      packet[1] = 15; // 15 payload bytes
       packet[2] = 0;
       packet[3] = freq & 0xFF;
       packet[4] = (freq >> 8) & 0xFF;
@@ -300,7 +301,9 @@ void loop() {
       packet[13] = (fr_last_n >> 8) & 0xFF;
       packet[14] = fr_last_rate_khz & 0xFF;
       packet[15] = (fr_last_rate_khz >> 8) & 0xFF;
-      usb_web.write(packet, 16);
+      packet[16] = phase_cdeg & 0xFF;
+      packet[17] = (phase_cdeg >> 8) & 0xFF;
+      usb_web.write(packet, 18);
       usb_web.flush();
     }
     else if (cmd == CMD_FR_STOP) {

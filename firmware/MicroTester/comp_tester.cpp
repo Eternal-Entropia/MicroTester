@@ -411,7 +411,10 @@ static bool measure_inductor(uint8_t pA, uint8_t pB, uint32_t r_dc_ohm100, uint3
     pinMode(adcPinB, INPUT);
     pinMode(adcPinA, OUTPUT);
     GPIOA->BSRR = resetMaskA;
-    delayMicroseconds(50);
+    delayMicroseconds(200);
+    
+    uint32_t cpu_freq = SystemCoreClock;
+    if (cpu_freq < 10000000) cpu_freq = 84000000; // Fallback sanity check
     
     // Check if line is initially LOW
     if ((GPIOA->IDR & readMaskB) == 0) {
@@ -419,68 +422,118 @@ static bool measure_inductor(uint8_t pA, uint8_t pB, uint32_t r_dc_ohm100, uint3
         int numTests = 64;
         int validTests = 0;
         
-        // Single trial to estimate magnitude
-        uint32_t t_init = DWT->CYCCNT;
-        GPIOA->BSRR = setMaskA;
-        uint32_t timeout_cyc = 84000000; // 1 second timeout (supports up to 100 Henries)
-        while ((GPIOA->IDR & readMaskB) == 0) {
-            if (DWT->CYCCNT - t_init > timeout_cyc) break;
+        // Ultra-fast 2-cycle pulse measurement with parasitic capacitance (Cp) spike rejection
+        auto measure_pulse = [&](uint32_t max_cyc) -> uint32_t {
+            uint32_t t_start = DWT->CYCCNT;
+            GPIOA->BSRR = setMaskA; // Atomic 1-cycle HIGH write
+            
+            // Ultra-tight 2-cycle polling loop (highest sub-nanosecond resolution)
+            while ((GPIOA->IDR & readMaskB) == 0) {
+                if ((DWT->CYCCNT - t_start) > max_cyc) break;
+            }
+            uint32_t elapsed = DWT->CYCCNT - t_start;
+            
+            // If transition occurred very quickly (< 300 cycles / ~3.5 us),
+            // check if this is a transient capacitive feedthrough spike (Cp)
+            // from a medium/large multi-layer coil that will collapse back to 0:
+            if (elapsed < 300 && elapsed < max_cyc) {
+                uint32_t t_chk = DWT->CYCCNT;
+                while ((DWT->CYCCNT - t_chk) < 180) {
+                    if ((GPIOA->IDR & readMaskB) == 0) {
+                        // Pin dropped back to 0! It was a capacitive spike from a large coil.
+                        // Now wait in the tight loop for the real inductive current rise:
+                        while ((GPIOA->IDR & readMaskB) == 0) {
+                            if ((DWT->CYCCNT - t_start) > max_cyc) break;
+                        }
+                        elapsed = DWT->CYCCNT - t_start;
+                        break;
+                    }
+                }
+            }
+            
+            GPIOA->BSRR = resetMaskA; // Reset line to LOW
+            return elapsed;
+        };
+        
+        // Single trial to estimate magnitude (up to 100ms timeout)
+        uint32_t timeout_cyc = cpu_freq / 10; // 100 ms timeout for initial probe
+        uint32_t first_cyc = measure_pulse(timeout_cyc);
+        
+        // Dynamic discharge time: complete 5*tau discharge (tau ~= first_cyc / 0.7)
+        uint32_t us_per_cyc_scaled = (cpu_freq / 1000000UL);
+        if (us_per_cyc_scaled == 0) us_per_cyc_scaled = 84;
+        uint32_t discharge_us = 40 + (uint32_t)(((uint64_t)first_cyc * 8ULL) / us_per_cyc_scaled);
+        if (discharge_us > 25000) discharge_us = 25000; // Cap max discharge at 25 ms
+        
+        uint32_t test_timeout = (first_cyc * 3) + (cpu_freq / 500); // At least 2ms
+        if (test_timeout > (cpu_freq / 20)) test_timeout = cpu_freq / 20; // Cap max per test at 50 ms
+        
+        if (first_cyc >= timeout_cyc) {
+            // Line never triggered (Rdc too high or open)
+            numTests = 0;
+        } else if (first_cyc > 40000) {
+            // Very large coil (> 500 mH)
+            numTests = 4;
+        } else if (first_cyc > 8000) {
+            // Large coil (100 mH .. 500 mH)
+            numTests = 8;
+        } else if (first_cyc > 1000) {
+            // Medium coil (10 mH .. 100 mH, e.g. 23.2 mH ~ 1900 cyc)
+            numTests = 16;
+        } else if (first_cyc > 100) {
+            // Small coil (1 mH .. 10 mH)
+            numTests = 32;
+        } else {
+            // Micro coil (< 1 mH)
+            numTests = 64;
         }
-        uint32_t first_cyc = DWT->CYCCNT - t_init;
-        GPIOA->BSRR = resetMaskA;
         
-        // For large coils (> 10 mH), 8 tests is plenty; for small coils, use 64 tests
-        if (first_cyc > 10000) numTests = 8;
-        else if (first_cyc > 2000) numTests = 16;
-        else numTests = 64;
-        
-        __disable_irq(); // Disable interrupts during pulse timing
+        // Ensure complete discharge after the initial estimation pulse
+        delayMicroseconds(discharge_us);
         
         for (int test = 0; test < numTests; test++) {
-            // Active discharge
+            // Active discharge between tests
             GPIOA->BSRR = resetMaskA;
-            delayMicroseconds(20);
+            delayMicroseconds(discharge_us);
             
-            uint32_t t_start = DWT->CYCCNT;
-            GPIOA->BSRR = setMaskA; // Atomic 1-cycle HIGH write to PA7/PA6/PA5
+            __disable_irq(); // Disable interrupts only during immediate pulse timing
+            uint32_t elapsed_cyc = measure_pulse(test_timeout);
+            __enable_irq();
             
-            while ((GPIOA->IDR & readMaskB) == 0) {
-                if (DWT->CYCCNT - t_start > timeout_cyc) break;
-            }
-            uint32_t elapsed_cyc = DWT->CYCCNT - t_start;
-            GPIOA->BSRR = resetMaskA;
-            
-            if (elapsed_cyc >= 3 && elapsed_cyc < timeout_cyc) {
+            if (elapsed_cyc >= 3 && elapsed_cyc < test_timeout) {
                 total_cycles += elapsed_cyc;
                 validTests++;
             }
         }
         
-        __enable_irq();
-        
-        if (validTests >= (numTests / 2)) {
+        if (validTests >= (numTests / 2) && validTests > 0) {
             float avg_cycles = (float)total_cycles / (float)validTests;
             
-            // Hardware baseline accounts for GPIO synchronizer (19.35 cyc) plus RC slew delay from Rdc
-            float baseline_cycles = 19.35f + (r_dc / 35.0f);
+            // Hardware baseline for the ultra-tight loop: GPIO synchronizer + bus pipeline latency
+            // Exactly 16.35 cycles on pure short circuit (0-ohm wire)
+            float baseline_cycles = 16.35f + (r_dc / 80.0f);
             float net_cycles = (avg_cycles > baseline_cycles) ? (avg_cycles - baseline_cycles) : 0.0f;
             
+            float v_supply = (vdda_mv > 2000.0f) ? (vdda_mv / 1000.0f) : 3.30f;
             float r_fast = 25.0f + r_dc + r_senseB;
-            float v_steady = 3.3f * (r_senseB / r_fast);
+            float v_steady = v_supply * (r_senseB / r_fast);
             
-            // Input threshold V_IT ~ 1.40V
-            float k_thresh = 0.580f;
-            if (v_steady > 1.50f) {
-                k_thresh = -logf(1.0f - (1.40f / v_steady));
-                if (k_thresh < 0.1f) k_thresh = 0.580f;
+            // Input threshold V_IT ~ 0.515 * V_supply (~1.70V at 3.3V, STM32F4 Schmitt trigger VT+)
+            float v_it = 0.515f * v_supply;
+            float k_thresh = 0.775f;
+            if (v_steady > (v_it + 0.05f)) {
+                float v_ratio = v_it / v_steady;
+                if (v_ratio > 0.95f) v_ratio = 0.95f;
+                k_thresh = -logf(1.0f - v_ratio);
+                if (k_thresh < 0.1f) k_thresh = 0.775f;
             }
             
-            float t_sec = net_cycles / 84000000.0f;
+            float t_sec = net_cycles / (float)cpu_freq;
             float tau = t_sec / k_thresh;
             float l_fast_uH = tau * r_fast * 1000000.0f;
             
-            // Real physical inductors have L proportional to wire length (L >= 15 uH + 1.2 uH * Rdc)
-            float min_l_uH = 15.0f + (r_dc * 1.2f);
+            // Real physical inductors threshold: allow down to 5 uH
+            float min_l_uH = 5.0f + (r_dc * 0.15f);
             
             uint32_t candidateFreq = 1000;
             if (l_fast_uH >= 1000000.0f)     candidateFreq = 100;     // >= 1 H: 100 Hz
@@ -490,8 +543,8 @@ static bool measure_inductor(uint8_t pA, uint8_t pB, uint32_t r_dc_ohm100, uint3
 
             float q_factor = (r_dc > 0.05f) ? ((2.0f * 3.14159f * candidateFreq * (l_fast_uH * 1e-6f)) / r_dc) : 10.0f;
 
-            // Inductor must have measurable delay, exceed Rdc noise threshold, and have valid Q factor >= 0.15
-            if (net_cycles >= 2.0f && l_fast_uH >= min_l_uH && q_factor >= 0.15f) {
+            // Inductor must have measurable delay, exceed Rdc noise threshold, and have valid Q factor
+            if (net_cycles >= 0.5f && l_fast_uH >= min_l_uH && q_factor >= 0.05f) {
                 measuredL_uH = l_fast_uH;
                 bestFreq = candidateFreq;
                 foundInductor = true;
@@ -537,7 +590,6 @@ static void analyze_data() {
         return;
     }
     
-    // ============ STEP 1: Check for SHORT (< 0.5 Ohm) ============
     // Check if it's a 3-way short (calibration mode)
     uint16_t diff01 = (GET_V(0, 0, false) > GET_V(0, 1, false)) ? (GET_V(0, 0, false) - GET_V(0, 1, false)) : (GET_V(0, 1, false) - GET_V(0, 0, false));
     uint16_t diff02 = (GET_V(1, 0, false) > GET_V(1, 2, false)) ? (GET_V(1, 0, false) - GET_V(1, 2, false)) : (GET_V(1, 2, false) - GET_V(1, 0, false));
@@ -631,6 +683,7 @@ static void analyze_data() {
         return;
     }
 
+    // ============ STEP 1: Check for SHORT (< 0.5 Ohm) ============
     for (int i = 0; i < 6; i++) {
         uint8_t pV = perms[i][0]; // VCC probe
         uint8_t pG = perms[i][1]; // GND probe
@@ -651,7 +704,9 @@ static void analyze_data() {
         // Real Short Circuit MUST conduct symmetrically in BOTH forward and reverse directions!
         if (vV > 500 && vG > 500 && diff_fwd < 15 && rev_vV > 500 && rev_vG > 500 && diff_rev < 15) {
             uint32_t diff = (diff_fwd + diff_rev) / 2;
-            uint32_t R100 = (uint32_t)68000UL * diff / vG; // 0.01 ohm units
+            uint32_t rl_gnd = g_RL[pG] / 10;
+            if (rl_gnd == 0) rl_gnd = 680;
+            uint32_t R100 = (uint32_t)(((uint64_t)rl_gnd * 100ULL * (uint64_t)diff) / (uint64_t)vG);
             
             // Check if this low DC resistance component is an Inductor before declaring Short Circuit!
             uint32_t ind_uH = 0, ind_freq = 0;
