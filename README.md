@@ -63,6 +63,10 @@ Release v1.2:fix capasitors. added custom oversampling in callibration.more mino
 
 Release v1.3:added phase sweep(experimental). fix inductors test
 
+Release v1.4: minor fix for capacitor
+
+
+
 Lib usage in project:
 
 usbdfu: https://github.com/devanlai/webdfu
