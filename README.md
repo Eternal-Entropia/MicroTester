@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://eternal-entropia.github.io/MicroTester/web/start.html"><img src="logo.svg" alt="MicroTester Logo" width="320"></a><br>
+  <a href="https://eternal-entropia.github.io/MicroTester/web/start.html"><img src="/web/img/logo.svg" alt="MicroTester Logo" width="320"></a><br>
   <strong>MCU-based Instrument Suite</strong>
 </p>
 
@@ -13,14 +13,15 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 - **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
-- **Signal Generator**: Programmable PWM signal generation and waveform outputs.
+- **Signal Generator**: Programmable PWM and sine,sawtooth signal generation.
+- **Frequency Response**: Measure filters and resonant circuits.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
   - **Diodes & LEDs**: Forward Voltage ($V_f$) & Pinout (Anode/Cathode)
   - **BJT Transistors**: $h_{FE} / \beta$, $V_{be}$, and Pinout (B, C, E)
   - **MOSFETs (N-Ch / P-Ch)**: $V_{th}$, Gate Capacitance ($C_g$), $R_{ds(on)}$, Pinout (G, D, S), and Body Diode $V_f$
-  - **Inductors & Coils**: Inductance (10 µH .. 1000 H), $R_{dc}$, Q-factor, and Reactance ($X_L$)
+  - **Inductors & Coils**: • Inductance (L): 50 µH .. 1000 H • DC Resistance (Rdc), Q Factor & Reactance (XL)
 
 ---
 
@@ -35,9 +36,9 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 ## Getting Started
 
-1. **Flash Firmware**: Compile and upload the firmware in `firmware/MicroTester` to your STM32F401 (Black Pill) using Arduino IDE / STM32Duino.
-2. **Launch Web UI**: Open `web/start.html` or `web/main.html` in your browser.
-3. **Connect**: Connect your MCU via Serial/WebUSB and start measuring!
+1. **Launch Web UI**: Open [site](https://eternal-entropia.github.io/MicroTester/web/start.html) or `web/start.html` in your browser.
+2. **Flash Firmware**: upload the firmware in browser to your MCU.
+3. **Connect**: Connect your MCU via WebUSB and start measuring!
 
 ## Release History
 
@@ -50,10 +51,18 @@ beta v2.1: fix pinout for component tester
 beta v3: Added new calibration. fix bugs. added bugs. now component tester measures mosfet
 ETS work on aliasing signals.
 
-beta v4: added Signal generator. update design. added 3.3v in voltage range
+beta v4: added Signal generator. update design. added 3.3v voltage range for oscil and voltmeter
 
-Release v1.2: Frequency Response (АЧХ) analyzer, Sigma-Delta DAC generator, diode detector & direct modes.
+beta v5: added PWA and icon. added inductors in component tester. minor fix
 
-Release v1.3: Frequency & Phase Response (АЧХ / ФЧХ) analyzer with Bode plot, Hardware Phase-Lock synchronization, Gain/Phase independent calibration, and 0 dB / 0° aligned baseline.
+Release v1: added Freq. responce. fix auto bias on oscilloscope. added settings and more minor fix
 
-Release v1.4: minor fix for capacitor
+Release v1.1: added link in hydra fw port. ui minor fix
+
+Release v1.2:fix capasitors. added custom oversampling in callibration.more minor fix
+
+Release v1.3:added phase sweep(experimental). fix inductors test
+
+Lib usage in project:
+
+usbdfu: https://github.com/devanlai/webdfu
