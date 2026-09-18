@@ -42,6 +42,9 @@ void comp_tester_loop();   // Call in main loop
 bool comp_tester_is_done();
 CompResult comp_tester_get_result();
 void comp_tester_set_cal(uint16_t vdda_mv, const uint16_t rl[3], const uint32_t rh[3], uint16_t esr_zero_x100 = 0);
+// Multi-frequency ESR table (120 Hz / 1 kHz / 10 kHz / 100 kHz).
+// Payload: [n(1)] + n x [freqHz u32][esr_x100 u16][td_x10000 u16][flags u16] (flags bit0=valid, bit1=experimental)
+bool comp_tester_get_esr_table_packet(uint8_t* out, uint8_t outSize, uint8_t* outLen);
 
 
 

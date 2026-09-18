@@ -28,6 +28,7 @@ const PKT_SIGMA_DELTA_READY  = 0x35;
 const PKT_VREF_DATA          = 0x20;
 const PKT_LOGIC_DATA         = 0x40;
 const PKT_COMP_RESULT        = 0x50;
+const PKT_COMP_ESR_TABLE     = 0x51;
 const PKT_FR_DATA            = 0x60;
 
 class MicroTesterUSB {

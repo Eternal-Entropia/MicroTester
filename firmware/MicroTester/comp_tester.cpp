@@ -7,7 +7,16 @@ static float vdda_mv = 3300.0f;
 static uint16_t g_RL[3] = {6800, 6800, 6800};       // in 0.1 ohm units
 static uint32_t g_RH[3] = {470000, 470000, 470000}; // in 1 ohm units
 static uint32_t g_comp_oversample = 256;            // ADC averaging (64..65536), set from UI
-static uint16_t g_esr_zero_x100 = 0;                // Loop resistance (switches + leads) in 0.01 ohm units
+// Loop resistance (switches + leads) per ESR table frequency, 0.01 ohm units.
+// Index: 0=120 Hz, 1=1 kHz, 2=10 kHz, 3=100 kHz. Measured on 3-probe short, RAM only.
+static uint16_t g_esr_zero_x100_tbl[4] = {0, 0, 0, 0};
+#define ESR_TBL_N 4
+static const uint32_t ESR_TBL_FREQ[ESR_TBL_N] = {120, 1000, 10000, 100000};
+// Multi-frequency ESR table for the last measured capacitor (sent as PKT_COMP_ESR_TABLE)
+struct CompEsrRow { uint32_t freq; uint16_t esr_x100; uint16_t td_x10000; uint16_t flags; }; // flags bit0=valid, bit1=experimental
+static CompEsrRow g_esr_table[ESR_TBL_N];
+static uint8_t g_esr_table_n = 0;
+static bool g_esr_table_ready = false;
 
 void comp_tester_set_cal(uint16_t vdda, const uint16_t rl[3], const uint32_t rh[3], uint16_t esr_zero_x100) {
     if (vdda >= 2500 && vdda <= 4000) vdda_mv = (float)vdda;
@@ -15,7 +24,7 @@ void comp_tester_set_cal(uint16_t vdda, const uint16_t rl[3], const uint32_t rh[
         if (rl && rl[i] >= 3000 && rl[i] <= 10000) g_RL[i] = rl[i];
         if (rh && rh[i] >= 100000 && rh[i] <= 1000000) g_RH[i] = rh[i];
     }
-    g_esr_zero_x100 = esr_zero_x100;
+    g_esr_zero_x100_tbl[1] = esr_zero_x100; // 1 kHz slot; other slots measured live on short-cal
 }
 
 #define P1_ADC PA7
@@ -79,6 +88,7 @@ static void discharge_probes_completely(uint8_t probeA = 0, uint8_t probeB = 1);
 static uint32_t measure_hfe(uint8_t c, uint8_t b, uint8_t e, bool is_pnp, uint16_t *out_vbe, uint16_t *out_iceo = NULL);
 static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vloss = NULL);
 static uint16_t measure_esr_1khz(uint8_t probeA, uint8_t probeB, uint32_t c_pf = 0);
+static uint16_t measure_esr(uint8_t probeA, uint8_t probeB, uint32_t c_pf, uint32_t freqHz, uint8_t zeroIdx, bool* out_valid = NULL);
 static uint16_t measure_rdson(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
 static uint16_t measure_vth(uint8_t g, uint8_t d, uint8_t s, bool is_nch);
 static bool test_mosfet_channel(uint8_t g, uint8_t d, uint8_t s, bool is_nch, uint16_t* out_vth, uint16_t* out_rds);
@@ -148,6 +158,8 @@ void comp_tester_start(uint8_t mode, uint16_t oversample) {
     state = STATE_DISCHARGE;
     state_timer = millis();
     result_ready = false;
+    g_esr_table_ready = false;
+    g_esr_table_n = 0;
     scan_step = 0;
     
     // Start discharge
@@ -158,6 +170,7 @@ void comp_tester_start(uint8_t mode, uint16_t oversample) {
 
 void comp_tester_stop() {
     state = STATE_IDLE;
+    g_esr_table_ready = false;
     set_probe_hiz(0);
     set_probe_hiz(1);
     set_probe_hiz(2);
@@ -169,6 +182,7 @@ bool comp_tester_is_done() {
 
 CompResult comp_tester_get_result() {
     result_ready = false;
+    g_esr_table_ready = false; // table packet is pulled before this call; clear afterwards
     return final_result;
 }
 
@@ -663,13 +677,25 @@ static void analyze_data() {
         uint32_t R_H2 = (uint32_t)((VH02 * 47000.0f) / (4096.0f - VH02));
         
         // Measure dynamic 1 kHz ESR zero baseline across the shorted probes (cancels ADC channel DC offset)
-        uint16_t saved_zero = g_esr_zero_x100;
-        g_esr_zero_x100 = 0;
+        uint16_t saved_zero1k = g_esr_zero_x100_tbl[1];
+        g_esr_zero_x100_tbl[1] = 0;
         uint16_t esr_z01 = measure_esr_1khz(0, 1, 0);
         uint16_t esr_z02 = measure_esr_1khz(0, 2, 0);
         uint16_t esr_z12 = measure_esr_1khz(1, 2, 0);
         uint32_t esr_zero_avg = (esr_z01 + esr_z02 + esr_z12) / 3;
-        g_esr_zero_x100 = saved_zero;
+        g_esr_zero_x100_tbl[1] = saved_zero1k;
+        // Zeros for the table frequencies (short => no capacitive slope, c_pf=0).
+        // Kept in firmware RAM; no protocol change needed.
+        for (uint8_t fi = 0; fi < ESR_TBL_N; fi++) {
+            if (fi == 1) continue; // 1 kHz already measured above
+            bool ok = false;
+            g_esr_zero_x100_tbl[fi] = 0;
+            uint32_t acc = 0;
+            acc += measure_esr(0, 1, 0, ESR_TBL_FREQ[fi], fi, &ok);
+            acc += measure_esr(0, 2, 0, ESR_TBL_FREQ[fi], fi, &ok);
+            acc += measure_esr(1, 2, 0, ESR_TBL_FREQ[fi], fi, &ok);
+            g_esr_zero_x100_tbl[fi] = (uint16_t)(acc / 3);
+        }
 
         // Wire R offset (in 0.01 ohm units) is purely the physical lead resistance
         uint32_t wire_r100 = esr_zero_avg;
@@ -1091,137 +1117,198 @@ static void discharge_probes_completely(uint8_t probeA, uint8_t probeB) {
     set_probe_hiz(2);
 }
 
-// ============ ESR + Dissipation Factor Measurement @ 1 kHz ============
-// Drives a 1 kHz square wave through the RL switches (VCC/GND toggling).
-// Symmetrically samples in balanced dual quadruplets at (250 - Delta) us and (250 + Delta) us.
-// Because the charging ramp of the capacitor is linear across the half-cycle,
-// summing samples symmetric to the exact midpoint T/4 (250 us) cancels the capacitive
-// triangle voltage (I/C * t) down to 0.000, isolating PURE ohmic ESR drop.
+// ============ ESR Measurement @ 1 kHz (wrapper over the unified engine) ============
+// See measure_esr() below: identical dual-quad slope cancellation, but the ADC
+// is read via direct registers (no analogRead) and the drive is BSRR-timed.
 static uint16_t measure_esr_1khz(uint8_t probeA, uint8_t probeB, uint32_t c_pf) {
-    const uint32_t HALF_US = 500; // 1 kHz half-period in microseconds
+    return measure_esr(probeA, probeB, c_pf, 1000, 1, NULL);
+}
+
+// ============ Unified ESR Measurement @ 120 Hz / 1 kHz / 10 kHz / 100 kHz ============
+// Single engine for all frequencies, NO Arduino analogRead anywhere: the ADC
+// is read via direct registers (~0.5-3 us/read depending on sample time,
+// same pattern as adc_sampler ets_fast_analogRead_raw) and the RL switches
+// toggle via 1-cycle BSRR writes (see measure_inductor). Sample time follows
+// the adc_sampler_capture_burst table (proven): long where it fits, 3 cycles
+// only at 100 kHz where the 5 us half-period demands it.
+// Deliberately no DMA/Goertzel: the TP probes are not on PWM-capable pins,
+// so a hardware-driven capture could not run concurrently with the drive
+// without new timer code (= flash bloat). No new libraries (only
+// ADC1/DWT/GPIOB already linked).
+#if defined(ARDUINO_ARCH_STM32)
+static inline uint16_t comp_adc_fast_read(void) {
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    uint32_t to = 10000;
+    while (!(ADC1->SR & ADC_SR_EOC) && --to) {}
+    return (uint16_t)ADC1->DR;
+}
+static inline void comp_adc_select_ch(uint8_t ch) { ADC1->SQR3 = ch; }
+// STM32F401 ADC channels of the probe pins: PA5=5, PA6=6, PA7=7
+static inline uint8_t comp_probe_adc_ch(uint8_t p) { return (p == 0) ? 7 : ((p == 1) ? 6 : 5); }
+// RL switch pins live on GPIOB: TP1=PB10, TP2=PB12, TP3=PB14
+static inline uint32_t comp_probe_rl_mask(uint8_t p) { return (p == 0) ? (1UL << 10) : ((p == 1) ? (1UL << 12) : (1UL << 14)); }
+static inline void comp_dwt_init(void) {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+static inline void comp_wait_until(uint32_t t0, uint32_t dt) {
+    while ((DWT->CYCCNT - t0) < dt) {} // unsigned math handles wrap
+}
+#endif
+
+static uint16_t measure_esr(uint8_t probeA, uint8_t probeB, uint32_t c_pf, uint32_t freqHz, uint8_t zeroIdx, bool* out_valid) {
+    if (out_valid) *out_valid = false;
+    if (probeA >= 3 || probeB >= 3 || probeA == probeB || zeroIdx >= ESR_TBL_N) return 0;
+
+    uint32_t half_us = 50;
+    uint16_t cycles = 2048;
+    uint8_t smode = 1; // 0=dual-quad, 1=single-quad, 2=single-pair
+    uint8_t smpCode = 1; // 15 cycles
+    if (freqHz <= 150) { half_us = 4167; cycles = 48; smode = 0; smpCode = 5; }        // 120 Hz (~400 ms)
+    else if (freqHz <= 1500) { half_us = 500; cycles = 512; smode = 0; smpCode = 5; }  // 1 kHz (~500 ms)
+    else if (freqHz <= 15000) { half_us = 50; cycles = 2048; smode = 1; smpCode = 1; } // 10 kHz (~200 ms)
+    else { half_us = 5; cycles = 8192; smode = 2; smpCode = 0; }                       // 100 kHz (~80 ms)
 
     discharge_probes_completely(probeA, probeB);
 
-    // Setup pin modes ONCE before the loop to eliminate pinMode overhead
+#if !defined(ARDUINO_ARCH_STM32)
+    (void)c_pf;
+    return 0;
+#else
+    comp_dwt_init();
+    // Pin modes once; ADC woken explicitly (no analogRead anywhere in ESR).
     pinMode(probes[probeA].rh_pin, INPUT);
     pinMode(probes[probeB].rh_pin, INPUT);
     pinMode(probes[probeA].rl_pin, OUTPUT);
     pinMode(probes[probeB].rl_pin, OUTPUT);
+    pinMode(probes[probeA].adc_pin, INPUT_ANALOG);
+    pinMode(probes[probeB].adc_pin, INPUT_ANALOG);
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    ADC1->CR2 |= ADC_CR2_ADON;
+    delayMicroseconds(5); // ADC startup tSTAB
+    uint8_t chA = comp_probe_adc_ch(probeA);
+    uint8_t chB = comp_probe_adc_ch(probeB);
+    // Sample time per frequency (same table as adc_sampler_capture_burst)
+    ADC1->SMPR2 &= ~((7UL << (3 * chA)) | (7UL << (3 * chB)));
+    ADC1->SMPR2 |= (((uint32_t)smpCode << (3 * chA)) | ((uint32_t)smpCode << (3 * chB)));
+    // Dummy conversions to settle the mux after channel setup
+    comp_adc_select_ch(chA); comp_adc_fast_read();
+    comp_adc_select_ch(chB); comp_adc_fast_read();
+    uint32_t maskA = comp_probe_rl_mask(probeA);
+    uint32_t maskB = comp_probe_rl_mask(probeB);
 
-    // 1. Measure ADC quad sampling speed (time for 4 reads: A, B, B, A)
-    uint32_t cal_start = micros();
-    for (int k = 0; k < 8; k++) {
-        analogRead(probes[probeA].adc_pin);
-        analogRead(probes[probeB].adc_pin);
-        analogRead(probes[probeB].adc_pin);
-        analogRead(probes[probeA].adc_pin);
+    const uint32_t CYC_PER_US = 84; // 84 MHz core
+    uint32_t half_ticks = half_us * CYC_PER_US;
+    uint32_t quad_ticks = 4 * CYC_PER_US; // budget for A,B,B,A fast reads
+    uint32_t pair_ticks = 2 * CYC_PER_US; // budget for A,B fast reads
+    uint32_t mid_ticks = half_ticks / 2;
+    // Dual-quad symmetric offsets around the midpoint (same idea as 1 kHz path)
+    uint32_t delta_ticks = 100 * CYC_PER_US; // 100 us
+    if (delta_ticks + quad_ticks / 2 + CYC_PER_US > mid_ticks) {
+        delta_ticks = (mid_ticks > quad_ticks / 2 + CYC_PER_US) ? (mid_ticks - quad_ticks / 2 - CYC_PER_US) : 0;
     }
-    uint32_t quad_time = (micros() - cal_start) / 8;
-    if (quad_time == 0) quad_time = 1;
-
-    // 2. Symmetric dual-sample timing around the midpoint (250 us)
-    // Quad 1 is centered at (250 - delta) us, Quad 2 is centered at (250 + delta) us
-    // Default delta = 100 us -> centers at 150 us and 350 us
-    uint32_t delta_mid = 100;
-    if (quad_time > 150) delta_mid = (HALF_US - quad_time) / 2;
-
-    uint32_t t_s1 = (250 >= (delta_mid + quad_time / 2)) ? (250 - delta_mid - quad_time / 2) : 0;
-    uint32_t t_s2 = 250 + delta_mid - quad_time / 2;
-    if (t_s2 + quad_time > HALF_US) t_s2 = HALF_US - quad_time;
-
-    uint32_t vA_pos_sum = 0, vB_pos_sum = 0;
-    uint32_t vA_neg_sum = 0, vB_neg_sum = 0;
-
-    const int num_cycles = 512; // ~512 ms accumulation -> noise floor ~ +-0.005 ohm
+    uint32_t t_s1 = (mid_ticks > delta_ticks + quad_ticks / 2) ? (mid_ticks - delta_ticks - quad_ticks / 2) : 0;
+    uint32_t t_s2 = mid_ticks + delta_ticks - quad_ticks / 2;
+    if (t_s2 + quad_ticks > half_ticks) t_s2 = (half_ticks > quad_ticks) ? (half_ticks - quad_ticks) : 0;
+    uint32_t t_sq = (mid_ticks > quad_ticks / 2) ? (mid_ticks - quad_ticks / 2) : 0;
+    uint32_t t_sp = (mid_ticks > pair_ticks / 2) ? (mid_ticks - pair_ticks / 2) : 0;
 
     // Pre-condition: establish the steady-state triangle wave
     for (int i = 0; i < 16; i++) {
-        digitalWrite(probes[probeA].rl_pin, HIGH);
-        digitalWrite(probes[probeB].rl_pin, LOW);
-        delayMicroseconds(HALF_US);
-        digitalWrite(probes[probeA].rl_pin, LOW);
-        digitalWrite(probes[probeB].rl_pin, HIGH);
-        delayMicroseconds(HALF_US);
+        GPIOB->BSRR = maskA; GPIOB->BSRR = (maskB << 16);
+        uint32_t t0 = DWT->CYCCNT; comp_wait_until(t0, half_ticks);
+        GPIOB->BSRR = (maskA << 16); GPIOB->BSRR = maskB;
+        t0 = DWT->CYCCNT; comp_wait_until(t0, half_ticks);
     }
 
-    for (int i = 0; i < num_cycles; i++) {
-        // --- POSITIVE HALF-CYCLE: A -> VCC via RL, B -> GND via RL ---
-        digitalWrite(probes[probeA].rl_pin, HIGH);
-        digitalWrite(probes[probeB].rl_pin, LOW);
-        uint32_t t_start = micros();
+    uint32_t vA_pos_sum = 0, vB_pos_sum = 0, vA_neg_sum = 0, vB_neg_sum = 0;
+    uint32_t per_half = (smode == 0) ? 4 : ((smode == 1) ? 2 : 1); // (A,B) pairs per half-cycle
 
-        // Quad 1: centered at (250 - delta) us
-        while (micros() - t_start < t_s1) {}
-        vA_pos_sum += analogRead(probes[probeA].adc_pin);
-        vB_pos_sum += analogRead(probes[probeB].adc_pin);
-        vB_pos_sum += analogRead(probes[probeB].adc_pin);
-        vA_pos_sum += analogRead(probes[probeA].adc_pin);
-
-        // Quad 2: centered at (250 + delta) us (slope cancels Quad 1)
-        while (micros() - t_start < t_s2) {}
-        vA_pos_sum += analogRead(probes[probeA].adc_pin);
-        vB_pos_sum += analogRead(probes[probeB].adc_pin);
-        vB_pos_sum += analogRead(probes[probeB].adc_pin);
-        vA_pos_sum += analogRead(probes[probeA].adc_pin);
-
-        while (micros() - t_start < HALF_US) {}
-
-        // --- NEGATIVE HALF-CYCLE: A -> GND via RL, B -> VCC via RL ---
-        digitalWrite(probes[probeA].rl_pin, LOW);
-        digitalWrite(probes[probeB].rl_pin, HIGH);
-        t_start = micros();
-
-        // Quad 1: centered at (250 - delta) us
-        while (micros() - t_start < t_s1) {}
-        vA_neg_sum += analogRead(probes[probeA].adc_pin);
-        vB_neg_sum += analogRead(probes[probeB].adc_pin);
-        vB_neg_sum += analogRead(probes[probeB].adc_pin);
-        vA_neg_sum += analogRead(probes[probeA].adc_pin);
-
-        // Quad 2: centered at (250 + delta) us (slope cancels Quad 1)
-        while (micros() - t_start < t_s2) {}
-        vA_neg_sum += analogRead(probes[probeA].adc_pin);
-        vB_neg_sum += analogRead(probes[probeB].adc_pin);
-        vB_neg_sum += analogRead(probes[probeB].adc_pin);
-        vA_neg_sum += analogRead(probes[probeA].adc_pin);
-
-        while (micros() - t_start < HALF_US) {}
+    // IRQs stay enabled: SysTick jitter averages out over thousands of cycles
+    for (int i = 0; i < cycles; i++) {
+        // --- POSITIVE HALF-CYCLE: A -> VCC, B -> GND ---
+        GPIOB->BSRR = maskA; GPIOB->BSRR = (maskB << 16);
+        uint32_t t0 = DWT->CYCCNT;
+        if (smode == 0) {
+            comp_wait_until(t0, t_s1);
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+            comp_wait_until(t0, t_s2);
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+        } else if (smode == 1) {
+            comp_wait_until(t0, t_sq);
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+        } else {
+            comp_wait_until(t0, t_sp);
+            comp_adc_select_ch(chA); vA_pos_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_pos_sum += comp_adc_fast_read();
+        }
+        comp_wait_until(t0, half_ticks);
+        // --- NEGATIVE HALF-CYCLE: A -> GND, B -> VCC ---
+        GPIOB->BSRR = (maskA << 16); GPIOB->BSRR = maskB;
+        t0 = DWT->CYCCNT;
+        if (smode == 0) {
+            comp_wait_until(t0, t_s1);
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+            comp_wait_until(t0, t_s2);
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+        } else if (smode == 1) {
+            comp_wait_until(t0, t_sq);
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+        } else {
+            comp_wait_until(t0, t_sp);
+            comp_adc_select_ch(chA); vA_neg_sum += comp_adc_fast_read();
+            comp_adc_select_ch(chB); vB_neg_sum += comp_adc_fast_read();
+        }
+        comp_wait_until(t0, half_ticks);
     }
 
     set_probe_hiz(probeA);
     set_probe_hiz(probeB);
     discharge_probes_completely(probeA, probeB);
 
-    uint32_t total_samples = (uint32_t)num_cycles * 4; // 2 quads = 4 (A, B) pairs per half-cycle
+    if (vB_pos_sum == 0 || vA_pos_sum == 0) return 0; // rails did not toggle
 
-    float vA_pos = (float)vA_pos_sum / total_samples;
-    float vB_pos = (float)vB_pos_sum / total_samples;
-    float vA_neg = (float)vA_neg_sum / total_samples;
-    float vB_neg = (float)vB_neg_sum / total_samples;
+    uint32_t total = (uint32_t)cycles * per_half;
+    float vA_pos = (float)vA_pos_sum / total;
+    float vB_pos = (float)vB_pos_sum / total;
+    float vA_neg = (float)vA_neg_sum / total;
+    float vB_neg = (float)vB_neg_sum / total;
 
     // Differential ESR drop; subtracting halves cancels ADC offset and drift.
     float diff_pos = vA_pos - vB_pos;
     float diff_neg = vA_neg - vB_neg;
     float v_esr_drop = (diff_pos - diff_neg) / 2.0f;
 
-    // Sanity: both rails must actually toggle (probe present and switching works)
-    if (vB_pos_sum == 0 || vA_pos_sum == 0) return 0;
-
-    // Include calibrated RL resistors
     float r_tot = ((float)g_RL[probeA] + (float)g_RL[probeB]) / 10.0f;
     if (r_tot < 200.0f) r_tot = 1360.0f;
     float vdda_v = vdda_mv / 1000.0f;
     float i_loop = vdda_v / r_tot;
-
-    // Convert the averaged drop from ADC counts to volts.
     float v_drop_v = v_esr_drop * vdda_v / 4096.0f;
 
-    // Compensate for non-linear exponential curvature at 1 kHz for smaller electrolytic caps (< 100 uF)
+    // Curvature compensation, generalized from the 1 kHz path
     if (c_pf >= 1000000) {
         float c_farad = (float)c_pf * 1e-12f;
         float tau = r_tot * c_farad;
         if (tau > 0.00005f) {
-            float x = (float)HALF_US * 1e-6f / (4.0f * tau);
+            float x = (float)half_us * 1e-6f / (4.0f * tau);
             if (x < 2.0f) {
                 float v_cap_offset = vdda_v * (x * x / 2.0f);
                 v_drop_v = (v_drop_v > v_cap_offset) ? (v_drop_v - v_cap_offset) : 0.0f;
@@ -1229,14 +1316,87 @@ static uint16_t measure_esr_1khz(uint8_t probeA, uint8_t probeB, uint32_t c_pf) 
         }
     }
 
-    // Pure physical ESR; g_esr_zero_x100 is calibrated from Calibration tab (0 by default)
-    float zero_offset = (float)g_esr_zero_x100 / 100.0f;
+    float zero_offset = (float)g_esr_zero_x100_tbl[zeroIdx] / 100.0f;
     float esr = (i_loop > 0.0f) ? (v_drop_v / i_loop - zero_offset) : 0.0f;
-
     if (esr < 0.0f) esr = 0.0f;
     uint32_t r_esr_x100 = (uint32_t)(esr * 100.0f);
     if (r_esr_x100 > 65000) r_esr_x100 = 65000;
+    if (out_valid) *out_valid = true;
     return (uint16_t)r_esr_x100;
+#endif
+}
+
+// (measure_esr_mid folded into measure_esr() above: one engine, no analogRead.)
+
+// Fill one ESR table row: honest tan(delta) on the row's own frequency.
+// Gates reject physically meaningless combos (slope clipping on small C,
+// ESL dominance on huge C at 100 kHz) instead of showing garbage.
+static void esr_table_push(uint32_t freqHz, uint16_t esr_x100, uint32_t c_pf, bool valid, bool experimental) {
+    if (g_esr_table_n >= ESR_TBL_N) return;
+    CompEsrRow* r = &g_esr_table[g_esr_table_n++];
+    r->freq = freqHz;
+    r->esr_x100 = esr_x100;
+    r->flags = (valid ? 1 : 0) | (experimental ? 2 : 0);
+    uint32_t td = 0;
+    if (valid && esr_x100 > 0 && c_pf > 0) {
+        float tan_delta = 2.0f * 3.14159265f * (float)freqHz * ((float)c_pf * 1e-12f) * ((float)esr_x100 / 100.0f);
+        if (tan_delta < 0.0f) tan_delta = 0.0f;
+        td = (uint32_t)(tan_delta * 10000.0f);
+        if (td > 65000) td = 65000;
+    }
+    r->td_x10000 = (uint16_t)td;
+}
+
+// Build the multi-frequency ESR table after the legacy 1 kHz measurement.
+// esr1k_x100: result of measure_esr_1khz (0 if not measured for this cap).
+static void measure_esr_table(uint8_t probeA, uint8_t probeB, uint32_t c_pf, uint16_t esr1k_x100, bool has1k) {
+    g_esr_table_n = 0;
+    g_esr_table_ready = false;
+    if (c_pf < 10000) return; // < 10 nF: no row is meaningful
+    bool ok = false;
+    // 120 Hz: only C >= 10 uF (smaller clips the triangle with 680 ohm drive)
+    if (c_pf >= 10000000) {
+        uint16_t e = measure_esr(probeA, probeB, c_pf, 120, 0, &ok);
+        esr_table_push(120, e, c_pf, ok, false);
+    } else {
+        esr_table_push(120, 0, c_pf, false, false);
+    }
+    // 1 kHz: legacy value (honest pair with value3 for old web UI)
+    esr_table_push(1000, esr1k_x100, c_pf, has1k && c_pf >= 1000000, false);
+    // 10 kHz: C >= 100 nF (no upper gate: triangle slope only shrinks with bigger C)
+    if (c_pf >= 100000) {
+        uint16_t e = measure_esr(probeA, probeB, c_pf, 10000, 2, &ok);
+        esr_table_push(10000, e, c_pf, ok, false);
+    } else {
+        esr_table_push(10000, 0, c_pf, false, false);
+    }
+    // 100 kHz: 10 nF .. 1000 uF, experimental (5 us half-period, pair sampling)
+    if (c_pf >= 10000 && c_pf <= 1000000000UL) {
+        uint16_t e = measure_esr(probeA, probeB, c_pf, 100000, 3, &ok);
+        esr_table_push(100000, e, c_pf, ok, true);
+    } else {
+        esr_table_push(100000, 0, c_pf, false, true);
+    }
+    g_esr_table_ready = true;
+}
+
+// Serialize the table for PKT_COMP_ESR_TABLE. Returns false if no table.
+bool comp_tester_get_esr_table_packet(uint8_t* out, uint8_t outSize, uint8_t* outLen) {
+    if (outLen) *outLen = 0;
+    if (!g_esr_table_ready || g_esr_table_n == 0 || !out) return false;
+    uint8_t need = 1 + g_esr_table_n * 10;
+    if (outSize < need) return false;
+    out[0] = g_esr_table_n;
+    for (uint8_t i = 0; i < g_esr_table_n; i++) {
+        uint8_t o = 1 + i * 10;
+        uint32_t f = g_esr_table[i].freq;
+        out[o] = f & 0xFF; out[o+1] = (f >> 8) & 0xFF; out[o+2] = (f >> 16) & 0xFF; out[o+3] = (f >> 24) & 0xFF;
+        out[o+4] = g_esr_table[i].esr_x100 & 0xFF; out[o+5] = (g_esr_table[i].esr_x100 >> 8) & 0xFF;
+        out[o+6] = g_esr_table[i].td_x10000 & 0xFF; out[o+7] = (g_esr_table[i].td_x10000 >> 8) & 0xFF;
+        out[o+8] = g_esr_table[i].flags & 0xFF; out[o+9] = (g_esr_table[i].flags >> 8) & 0xFF;
+    }
+    if (outLen) *outLen = need;
+    return true;
 }
 
 // ============ STM32 RC Time Constant Capacitor Measurement ============
@@ -1482,19 +1642,24 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vlos
         final_result.value3 = 0;
         final_result.flags = 0;
         final_result.vloss_x10 = vloss_pct_x10;
-        if (c_pf >= 1000000) { // >= 1 uF: ESR measured at 1 kHz, tan(delta) standard @ 1 kHz
-            uint16_t esr_x100 = measure_esr_1khz(probeA, probeB, c_pf);
-            final_result.value2 = esr_x100;
-            if (esr_x100 > 0) {
+        uint16_t esr1k_x100 = 0;
+        bool has1k = false;
+        if (c_pf >= 1000000) { // >= 1 uF: ESR measured at 1 kHz, tan(delta) @ 1 kHz (honest pair)
+            esr1k_x100 = measure_esr_1khz(probeA, probeB, c_pf);
+            has1k = true;
+            final_result.value2 = esr1k_x100;
+            if (esr1k_x100 > 0) {
                 // tan(delta) dissipation factor @ 1 kHz: D = 2*pi*1000*C*ESR
                 float c_farad = (float)c_pf * 1e-12f;
-                float esr_ohm = (float)esr_x100 / 100.0f;
+                float esr_ohm = (float)esr1k_x100 / 100.0f;
                 float tan_delta = 2.0f * 3.14159265f * 1000.0f * c_farad * esr_ohm;
                 uint32_t td_x10000 = (uint32_t)(tan_delta * 10000.0f);
                 if (td_x10000 > 65000) td_x10000 = 65000;
                 final_result.value3 = td_x10000;
             }
         }
+        // Multi-frequency ESR table (120 Hz / 1 kHz / 10 kHz / 100 kHz), each tan on its own frequency
+        measure_esr_table(probeA, probeB, c_pf, esr1k_x100, has1k);
         discharge_probes_completely(probeA, probeB);
         return true;
     }

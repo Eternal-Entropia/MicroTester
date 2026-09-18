@@ -360,6 +360,16 @@ void loop() {
   // 5. Check if Component Tester is done
   if (comp_tester_is_done()) {
     if (usb_web.connected()) {
+      // ESR table first so the host caches it before the result is displayed
+      uint8_t tablePkt[48];
+      uint8_t tableLen = 0;
+      if (comp_tester_get_esr_table_packet(tablePkt + 3, sizeof(tablePkt) - 3, &tableLen)) {
+        tablePkt[0] = PKT_COMP_ESR_TABLE;
+        tablePkt[1] = tableLen;
+        tablePkt[2] = 0;
+        usb_web.write(tablePkt, 3 + tableLen);
+        usb_web.flush();
+      }
       CompResult result = comp_tester_get_result();
       uint8_t packet[32];
       packet[0] = PKT_COMP_RESULT;

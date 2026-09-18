@@ -31,6 +31,7 @@
 #define PKT_OSCILLOSCOPE_DATA  0x12
 #define PKT_SIGMA_DELTA_READY  0x35  // Reply when Sigma-Delta DAC bitstream is loaded and playback started
 #define PKT_COMP_RESULT        0x50  // Component test result
+#define PKT_COMP_ESR_TABLE     0x51  // ESR table: [n(1)] + n x [freqHz(4)] [esr_x100(2)] [td_x10000(2)] [flags(2)]
 #define PKT_FR_DATA            0x60  // FR point reply: [freq_b0..3(4)] [mode(1)] [value_b0..3(4)]
 
 // Command structure from Host (Variable length payload)

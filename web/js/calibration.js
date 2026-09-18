@@ -8,6 +8,7 @@ window.Calibration = {
     _calibrationBusy: false,                   // mutex: blocks volt/osc while calibrating
     compOffsetR: 0, // Component Tester Short resistance offset (milliohms)
     compOffsetESR: 0, // Component Tester 1 kHz ESR Zero offset (milliohms)
+    compESRManualTrim: 0, // Manual PC-side ESR trim in 0.01 ohm units (-500..+500 = -5.00..+5.00 ohm)
     compRL: [680, 680, 680], // Component Tester pull-down resistances for TP1, TP2, TP3
     compRH: [470000, 470000, 470000], // Component Tester 470k resistances for TP1, TP2, TP3
 
@@ -73,6 +74,11 @@ window.Calibration = {
             if (savedCompESR) {
                 const parsedESR = parseInt(savedCompESR, 10);
                 if (!isNaN(parsedESR) && parsedESR >= 0 && parsedESR <= 5000) this.compOffsetESR = parsedESR;
+            }
+            const savedEsrTrim = localStorage.getItem('microtester_comp_esr_manual');
+            if (savedEsrTrim !== null && savedEsrTrim !== '') {
+                const parsedTrim = parseInt(savedEsrTrim, 10);
+                if (!isNaN(parsedTrim) && parsedTrim >= -500 && parsedTrim <= 500) this.compESRManualTrim = parsedTrim;
             }
             const savedRL = localStorage.getItem('microtester_comp_RL');
             if (savedRL) {
@@ -252,6 +258,21 @@ window.Calibration = {
 
         microTester.sendCommand(0x52 /* CMD_COMP_SET_CAL */, buf);
         console.log("Sent CMD_COMP_SET_CAL to STM32:", { vddaMv, rl, rh, esrZeroX100 });
+    },
+
+    setCompESRManual: function(x100) {
+        let v = Math.round(x100 || 0);
+        if (v < -500) v = -500;
+        if (v > 500) v = 500;
+        this.compESRManualTrim = v;
+        try {
+            localStorage.setItem('microtester_comp_esr_manual', String(v));
+        } catch (e) {}
+        window.dispatchEvent(new CustomEvent('comp-esr-trim-updated', { detail: v }));
+    },
+
+    adjustCompESRManual: function(deltaX100) {
+        this.setCompESRManual((this.compESRManualTrim || 0) + (deltaX100 || 0));
     },
 
     // Store a software zero offset from a probe-referred voltage reading
@@ -1055,6 +1076,43 @@ window.addEventListener('DOMContentLoaded', () => {
             updateCompBadge();
         });
     }
+
+    const btnEsrTrimMinus = document.getElementById('btnEsrTrimMinus');
+    const btnEsrTrimPlus = document.getElementById('btnEsrTrimPlus');
+    const inpEsrTrim = document.getElementById('inpEsrTrim');
+
+    function syncEsrTrimInput() {
+        if (!inpEsrTrim) return;
+        if (document.activeElement !== inpEsrTrim) {
+            inpEsrTrim.value = ((window.Calibration.compESRManualTrim || 0) / 100).toFixed(2);
+        }
+    }
+
+    if (btnEsrTrimMinus) {
+        btnEsrTrimMinus.addEventListener('click', () => {
+            window.Calibration.adjustCompESRManual(-1);
+        });
+    }
+    if (btnEsrTrimPlus) {
+        btnEsrTrimPlus.addEventListener('click', () => {
+            window.Calibration.adjustCompESRManual(1);
+        });
+    }
+    if (inpEsrTrim) {
+        const applyTrimInput = () => {
+            let v = parseFloat(inpEsrTrim.value);
+            if (isNaN(v)) v = 0;
+            if (v < -5) v = -5;
+            if (v > 5) v = 5;
+            window.Calibration.setCompESRManual(Math.round(v * 100));
+        };
+        inpEsrTrim.addEventListener('change', applyTrimInput);
+        inpEsrTrim.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyTrimInput();
+        });
+    }
+    window.addEventListener('comp-esr-trim-updated', syncEsrTrimInput);
+    syncEsrTrimInput();
     
     window.addEventListener('comp-calib-updated', () => {
         updateCompBadge();

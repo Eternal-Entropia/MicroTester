@@ -59,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const legendPhase = document.getElementById('legendFrPhase');
 
     const btnStop = document.getElementById('btnFrStop');
-    const btnFrCalibToolbar = document.getElementById('btnFrCalibToolbar');
     const btnCalibDiode = document.getElementById('btnFrCalibDiode');
     const btnCalibDirect = document.getElementById('btnFrCalibDirect');
     const btnCalibSine = document.getElementById('btnFrCalibSine');
@@ -409,7 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnSweep) btnSweep.disabled = state.busy;
         if (btnSweepPhase) btnSweepPhase.disabled = state.busy;
         if (btnSweepBode) btnSweepBode.disabled = state.busy;
-        if (btnFrCalibToolbar) btnFrCalibToolbar.disabled = state.busy;
         if (btnCalibDiode) btnCalibDiode.disabled = state.busy;
         if (btnCalibDirect) btnCalibDirect.disabled = state.busy;
         if (btnCalibSine) btnCalibSine.disabled = state.busy;
@@ -1867,7 +1865,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnViewPhase) btnViewPhase.addEventListener('click', () => setViewMode('phase'));
     if (btnViewBoth) btnViewBoth.addEventListener('click', () => setViewMode('both'));
 
-    if (btnFrCalibToolbar) btnFrCalibToolbar.addEventListener('click', () => runAutoCalibration(state.mode));
     if (btnStop) btnStop.addEventListener('click', stopSweep);
     if (btnCalibDiode) btnCalibDiode.addEventListener('click', () => runAutoCalibration('diode'));
     if (btnCalibDirect) btnCalibDirect.addEventListener('click', () => runAutoCalibration('direct'));

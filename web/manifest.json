@@ -1,7 +1,7 @@
 {
-  "name": "MicroTester RV1.3",
+  "name": "MicroTester RV1.4",
   "short_name": "MicroTester",
-  "version": "rv1.3",
+  "version": "rv1.4",
   "description": "STM32 Oscilloscope, Component Tester, Signal Generator & Voltmeter",
   "start_url": "start.html",
   "scope": "./",

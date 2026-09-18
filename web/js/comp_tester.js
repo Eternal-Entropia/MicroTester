@@ -201,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             testing = true;
+            lastEsrTable = null;
             updateCompIndicator(true);
             statusEl.innerText = 'Testing...';
             statusEl.className = 'comp-status testing';
@@ -233,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             stopActiveInstruments();
             if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             testing = true;
+            lastEsrTable = null;
             updateCompIndicator(true);
             statusEl.innerText = 'Testing Small Cap...';
             statusEl.className = 'comp-status testing';
@@ -270,6 +272,92 @@ document.addEventListener('DOMContentLoaded', () => {
             btnTest.disabled = false;
             if (btnSmallCap) btnSmallCap.disabled = false;
         });
+    }
+
+    // ESR table cache (PKT_COMP_ESR_TABLE arrives before PKT_COMP_RESULT).
+    // Ungated by `testing` on purpose: firmware always sends TABLE first.
+    let lastEsrTable = null;
+    let lastEsrTableTime = 0;
+
+    microTester.addDataListener((data) => {
+        if (!data || data.length < 4) return;
+        if (data[0] !== PKT_COMP_ESR_TABLE) return;
+        const pktLen = data[1] | (data[2] << 8);
+        const payload = data.slice(3, 3 + pktLen);
+        if (payload.length < 1) return;
+        const n = payload[0];
+        if (n < 1 || n > 4) return;
+        const rows = [];
+        for (let i = 0; i < n; i++) {
+            const o = 1 + i * 10;
+            if (o + 10 > payload.length) break;
+            const dv = new DataView(payload.buffer, payload.byteOffset + o, 10);
+            rows.push({
+                freq: dv.getUint32(0, true),
+                esr: dv.getUint16(4, true),
+                td: dv.getUint16(6, true),
+                flags: dv.getUint16(8, true)
+            });
+        }
+        if (rows.length) {
+            lastEsrTable = rows;
+            lastEsrTableTime = Date.now();
+            compLog(`[RX] PKT_COMP_ESR_TABLE (${rows.length} rows)`, 'rx', payload);
+        }
+    });
+
+    function getFreshEsrTable() {
+        if (!lastEsrTable || !lastEsrTable.length) return null;
+        if (Date.now() - lastEsrTableTime > 8000) { lastEsrTable = null; return null; }
+        return lastEsrTable;
+    }
+
+    function fmtEsrFreq(f) {
+        if (f >= 1000000) return (f / 1000000) + ' MHz';
+        if (f >= 1000) return (f / 1000) + ' kHz';
+        return f + ' Hz';
+    }
+
+    function buildEsrTableHtml(rows, cVal, esrTrim, vloss) {
+        const cF = cVal * 1e-12;
+        let html = '';
+        if (vloss !== undefined) html += `<div class="esr-vloss">Vloss: ${(vloss / 10).toFixed(1)}%</div>`;
+        html += '<div class="esr-wrap">';
+        html += '<table class="esr-table">' +
+            '<thead><tr>' +
+            '<th>f</th>' +
+            '<th>ESR</th>' +
+            '<th>tan δ</th>' +
+            '<th>Q</th>' +
+            '<th>Xc</th>' +
+            '</tr></thead><tbody>';
+        for (const row of rows) {
+            const valid = (row.flags & 1) !== 0;
+            const refMark = (row.freq === 1000) ? ' (ref)' : '';
+            const fStr = fmtEsrFreq(row.freq) + refMark;
+            if (!valid) {
+                html += `<tr><td class="esr-freq">${fStr}</td>` +
+                    `<td colspan="4" class="esr-na">—</td></tr>`;
+                continue;
+            }
+            // Manual trim is subtracted from every row (loop resistance is frequency-independent)
+            const esrShownRow = row.esr - (esrTrim || 0);
+            const esrOhm = esrShownRow / 100;
+            const tdRow = (esrOhm > 0 && cF > 0) ? (2.0 * Math.PI * row.freq * cF * esrOhm) : 0;
+            const qRow = tdRow > 0 ? (1 / tdRow) : Infinity;
+            const xcRow = cF > 0 ? (1.0 / (2.0 * Math.PI * row.freq * cF)) : 0;
+            html += `<tr><td class="esr-freq">${fStr}</td>` +
+                `<td>${(esrShownRow / 100).toFixed(2)} Ω</td>` +
+                `<td>${tdRow.toFixed(3)}</td>` +
+                `<td>${qRow >= 100 ? '≥100' : qRow.toFixed(1)}</td>` +
+                `<td>${formatResistance(xcRow * 100)}</td></tr>`;
+        }
+        html += '</tbody></table>';
+        if (rows.some(r => r.freq === 1000 && (r.flags & 1) !== 0)) {
+            html += '<div class="esr-note">1 kHz is the reference</div>';
+        }
+        html += '</div>';
+        return html;
     }
 
     // Data listener for component test results
@@ -399,25 +487,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 value = formatCapacitance(cVal);
 
                 // Secondary (value2): ESR*100; Tertiary (value3): tan(delta)*10000 @ 1 kHz; vloss: Vloss in 0.1%
-                let capDetails = [];
-                if (r.value2 !== undefined && cVal >= 1000000) {
-                    capDetails.push(`ESR @ 1 kHz: ${(r.value2 / 100).toFixed(2)} Ω`);
+                // Manual trim is subtracted from the finished ESR value (positive trim lowers shown ESR)
+                const esrTrim = (typeof window.Calibration !== 'undefined' && window.Calibration.compESRManualTrim) ? window.Calibration.compESRManualTrim : 0;
+                const esrShown = (r.value2 || 0) - esrTrim;
+                const esrTable = (cVal >= 10000) ? getFreshEsrTable() : null;
+                if (esrTable) {
+                    // Multi-frequency table from new firmware: each tan on its own frequency
+                    secondary = buildEsrTableHtml(esrTable, cVal, esrTrim, r.vloss);
+                    compLog(`[TABLE] ESR table applied (${esrTable.length} rows, trim=${(esrTrim / 100).toFixed(2)} Ω)`, 'calc');
+                    lastEsrTable = null; // consume once
+                } else {
+                    let capDetails = [];
+                    if (r.value2 !== undefined && cVal >= 1000000) {
+                        capDetails.push(`ESR @ 1 kHz: ${(esrShown / 100).toFixed(2)} Ω`);
+                    }
+                    if (r.vloss !== undefined) {
+                        capDetails.push(`Vloss: ${(r.vloss / 10).toFixed(1)}%`);
+                    }
+                    if (td > 0) {
+                        const q = td > 0 ? (1 / td) : Infinity;
+                        capDetails.push(`tan δ: ${td.toFixed(3)} (Q ≈ ${q >= 100 ? '≥100' : q.toFixed(1)}) @ 1 kHz`);
+                    } else if (cVal >= 1000000 && r.value2 !== undefined) {
+                        capDetails.push(`tan δ: 0.000 (Q ≈ ≥100) @ 1 kHz`);
+                    }
+                    if (cVal > 0) {
+                        const cFarad = cVal * 1e-12;
+                        const xcOhm = 1.0 / (2.0 * Math.PI * 1000.0 * cFarad);
+                        capDetails.push(`Xc: ${formatResistance(xcOhm * 100)} @ 1 kHz`);
+                    }
+                    secondary = capDetails.join('  |  ');
                 }
-                if (r.vloss !== undefined) {
-                    capDetails.push(`Vloss: ${(r.vloss / 10).toFixed(1)}%`);
-                }
-                if (td > 0) {
-                    const q = td > 0 ? (1 / td) : Infinity;
-                    capDetails.push(`tan δ: ${td.toFixed(3)} (Q ≈ ${q >= 100 ? '≥100' : q.toFixed(1)}) @ 1 kHz`);
-                } else if (cVal >= 1000000 && r.value2 !== undefined) {
-                    capDetails.push(`tan δ: 0.000 (Q ≈ ≥100) @ 1 kHz`);
-                }
-                if (cVal > 0) {
-                    const cFarad = cVal * 1e-12;
-                    const xcOhm = 1.0 / (2.0 * Math.PI * 1000.0 * cFarad);
-                    capDetails.push(`Xc: ${formatResistance(xcOhm * 100)} @ 1 kHz`);
-                }
-                secondary = capDetails.join('  |  ');
 
                 if (isPolarized) {
                     probeMap = `+ ${probeLabels[r.pinA]}  — ${probeLabels[r.pinB]}`;

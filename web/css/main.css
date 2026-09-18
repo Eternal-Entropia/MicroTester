@@ -685,3 +685,71 @@
     color: #ffffff !important;
     font-weight: 600;
 }
+
+/* ---- Component Tester ESR table ---- */
+.esr-wrap {
+    display: inline-block;
+    margin-top: 10px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 10px 16px 8px;
+    text-align: center;
+}
+
+.esr-vloss {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+table.esr-table {
+    border-collapse: collapse;
+    margin: 0 auto;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.esr-table thead th {
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-align: right;
+    padding: 2px 12px 6px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.esr-table thead th:first-child {
+    text-align: left;
+}
+
+.esr-table tbody td {
+    padding: 5px 12px;
+    text-align: right;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.esr-table tbody tr + tr td {
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.esr-table td.esr-freq {
+    text-align: left;
+    color: #38bdf8;
+    font-weight: 600;
+}
+
+.esr-table td.esr-na {
+    text-align: center;
+    color: #475569;
+}
+
+.esr-note {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #475569;
+}

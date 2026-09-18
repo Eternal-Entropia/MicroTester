@@ -420,7 +420,7 @@
 
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Release v1.3
+                    MicroTester Release v1.4
                 </div>
             </div>
         </aside>
@@ -996,9 +996,6 @@
                             </button>
                             <button class="btn btn-danger btn-sm" id="btnFrStop" disabled>
                                 Stop
-                            </button>
-                            <button class="btn btn-outline btn-sm" id="btnFrCalibToolbar" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Calibrate Loopback Reference (Gain & Phase)">
-                                Calibrate
                             </button>
                         </div>
                         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
@@ -1596,6 +1593,17 @@
                                             title="Reset Calibration">×</span>
                                     </span>
                                 </div>
+                                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
+                                    <span style="font-size: 12px; color: #94a3b8;">ESR manual trim:</span>
+                                    <button class="btn btn-outline btn-sm" id="btnEsrTrimMinus"
+                                        style="min-width: 32px; font-size: 14px; font-weight: bold;" title="Decrease by 0.01 Ω">−</button>
+                                    <input type="number" id="inpEsrTrim" min="-5" max="5" step="0.01" value="0.00"
+                                        style="width: 80px; font-size: 12px; background: rgba(15,23,42,0.8); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); border-radius: 6px; padding: 4px 8px; text-align: center;"
+                                        title="Manual offset subtracted from the displayed ESR @ 1 kHz (Ω)">
+                                    <button class="btn btn-outline btn-sm" id="btnEsrTrimPlus"
+                                        style="min-width: 32px; font-size: 14px; font-weight: bold;" title="Increase by 0.01 Ω">+</button>
+                                    <span style="font-size: 12px; color: #94a3b8;">Ω</span>
+                                </div>
                             </div>
 
                             <!-- 3. Frequency Response Calibration -->
@@ -1744,7 +1752,7 @@
                         </div>
 
                         <div style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-                            MicroTester Release v1.3
+                            MicroTester Release v1.4
                         </div>
 
                         <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">
@@ -2041,9 +2049,9 @@
     <script src="js/oscilloscope.js?v=3"></script>
     <script src="js/pwm_generator.js"></script>
     <script src="js/signal_generator.js?v=2"></script>
-    <script src="js/comp_tester.js?v=14"></script>
+    <script src="js/comp_tester.js?v=17"></script>
     <script src="js/logger.js?v=2"></script>
-    <script src="js/freqresp.js?v=58"></script>
+    <script src="js/freqresp.js?v=59"></script>
 
     <script>
         if ('serviceWorker' in navigator) {
