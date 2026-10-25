@@ -13,7 +13,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 
 - **Oscilloscope**: Multi-channel waveform visualization with Equivalent Time Sampling (ETS), up to 3.8 MHz Real-Time mode (experimental), trigger controls, and timebase scaling.
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
-- **Signal Generator**: Programmable PWM and sine,sawtooth signal generation.
+- **Signal Generator**: Programmable PWM and sine,sawtooth, fm,am,ssb, class-D(pwm) modulation signal generation.
 - **Frequency Response**: Measure filters and resonant circuits.
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
@@ -65,7 +65,7 @@ Release v1.3:added phase sweep(experimental). fix inductors test
 
 Release v1.4: minor fix for capacitor
 
-Release v1.5: added SDR (undersampling or external Polyakov mixer).  added modulator generator. more minor fixes
+Release v1.5: added SDR (undersampling or external Polyakov mixer).  added modulator generator. more minor fixes. new function maybe unstable 
 
 
 Lib usage in project:
