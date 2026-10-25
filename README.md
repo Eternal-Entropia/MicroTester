@@ -15,6 +15,7 @@ MicroTester transforms low-cost microcontrollers into a powerful desktop laborat
 - **Voltmeter**: Multi-channel voltage measurement with ADC oversampling for enhanced precision and ±30V auto-polarity detection.
 - **Signal Generator**: Programmable PWM and sine,sawtooth, fm,am,ssb, class-D(pwm) modulation signal generation.
 - **Frequency Response**: Measure filters and resonant circuits.
+- **SDR receiver**: Work up to 30Mhz. Demodulate: am. fm. ssb signals
 - **Component Tester**: Automatic pinout detection and parameter measurement for:
   - **Resistors**: 0.1 Ω .. 10 MΩ
   - **Capacitors**: 1 pF .. 10,000 µF + ESR (Equivalent Series Resistance)
