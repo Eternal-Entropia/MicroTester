@@ -65,6 +65,7 @@ Release v1.3:added phase sweep(experimental). fix inductors test
 
 Release v1.4: minor fix for capacitor
 
+Release v1.5: added SDR (undersampling or external Polyakov mixer).  added modulator generator. more minor fixes
 
 
 Lib usage in project:
