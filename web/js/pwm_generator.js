@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lblSigTLow   = document.getElementById('lblSigTLow');
     const lblSigResolution    = document.getElementById('lblSigResolution');
     const lblSigStepPrecision = document.getElementById('lblSigStepPrecision');
+    const lblSigRealFreq      = document.getElementById('lblSigRealFreq');
     const lblSigStatus = document.getElementById('lblSigStatus');
     const sigGenIndicator = document.getElementById('sigGenIndicator');
     const canvas       = document.getElementById('sigWaveCanvas');
@@ -33,12 +34,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isRunning = false;
 
-    // --- Enable/Disable Buttons based on USB Connection ---
-    setInterval(() => {
-        const connected = !!(microTester && microTester.device);
-        if (btnSigStart) btnSigStart.disabled = !connected || isRunning;
-        if (btnSigStop)  btnSigStop.disabled  = !connected || !isRunning;
-    }, 500);
+    // --- Enable/Disable Buttons based on Running state ---
+    // Start stays clickable while disconnected: clicking it opens the WebUSB
+    // device picker (same UX as the oscilloscope / voltmeter tabs).
+    const syncRunButtons = () => {
+        if (btnSigStart) btnSigStart.disabled = isRunning;
+        if (btnSigStop)  btnSigStop.disabled  = !isRunning;
+    };
+    syncRunButtons();
+    setInterval(syncRunButtons, 500);
 
     // --- Helper: Format Time Units ---
     function formatTime(seconds) {
@@ -71,27 +75,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cfgSigDuty) cfgSigDuty.disabled = (waveform === 0 || isDc);
         if (cfgSigDutyRange) cfgSigDutyRange.disabled = (waveform === 0 || isDc);
 
-        // Update Knob UI
+        // Firmware-exact duty math: the compare register holds
+        // floor((ARR + 1) * duty% / 100) ticks of high time (fixed 50% for the
+        // square wave). That is the REAL high time the timer can produce —
+        // finer input percents collapse into the same compare value.
+        const per = pwmPeriod(freq);
+        const dutyRealPct = dutyRealPercent(waveform, duty, per);
+        const dutyDec = per.ticks < 100 ? 2 : (per.ticks < 2000 ? 1 : 0);
+
+        // Update Knob UI (duty knob text always shows the real duty)
         updateKnobUI(freq);
-        updateDutyKnobPwmUI(duty);
+        updateDutyKnobPwmUI(duty, dutyRealPct, per.ticks);
 
         if (isDc) {
             if (lblSigPeriod) lblSigPeriod.innerText = 'DC';
             if (lblSigTHigh)  lblSigTHigh.innerText  = 'Continuous';
-            if (lblSigTLow)   lblSigTLow.innerText   = '0 ms';
+            if (lblSigTLow)  (lblSigTLow.innerText   = '0 ms');
             if (lblSigResolution)    lblSigResolution.innerText    = 'N/A (DC)';
             if (lblSigStepPrecision) lblSigStepPrecision.innerText = 'N/A';
         } else {
-            const periodSec = 1.0 / freq;
-            const tHighSec  = periodSec * (duty / 100.0);
+            const realFreq = SIG_TIM_CLK / (per.psc * per.ticks);   // what the timer produces
+            const periodSec = 1.0 / realFreq;
+            const tHighSec  = periodSec * (dutyRealPct / 100.0);
             const tLowSec   = periodSec - tHighSec;
 
             if (lblSigPeriod) lblSigPeriod.innerText = formatTime(periodSec);
             if (lblSigTHigh)  lblSigTHigh.innerText  = formatTime(tHighSec);
             if (lblSigTLow)   lblSigTLow.innerText   = formatTime(tLowSec);
 
-            // Compute Timer PWM Resolution (STM32 Timer Clock = 84 MHz)
-            const resSteps = Math.max(2, Math.floor(84000000 / freq));
+            if (lblSigRealFreq) {
+                const periodTicks = per.psc * per.ticks;
+                lblSigRealFreq.innerText = formatFreq(realFreq) + ' (' + periodTicks.toLocaleString() + ' ticks)';
+            }
+
+            // Timer PWM Resolution — duty steps (compare-register granularity)
+            const resSteps = per.ticks;
             const resBits  = Math.log2(resSteps).toFixed(1);
             const stepPct  = (100.0 / resSteps);
             const fmtPct   = stepPct < 0.01 ? stepPct.toFixed(4) : (stepPct < 1 ? stepPct.toFixed(2) : stepPct.toFixed(1));
@@ -154,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 // Draw Waveform Line
                 const periodPx = 180; // 180px per full period
-                const highPx = periodPx * (duty / 100.0);
+                const highPx = periodPx * (dutyRealPct / 100.0);
 
                 ctx.beginPath();
                 let currX = 20;
@@ -187,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ctx.fillText(`3.3V (HIGH)`, 25, yHigh - 10);
                     ctx.fillText(`0V (LOW)`, 25, yLow + 20);
                 }
-                ctx.fillText(`Freq: ${formatFreq(freq)}  |  Duty: ${duty}%`, w - 240, 24);
+                ctx.fillText(`Freq: ${formatFreq(freq)}  |  Duty: ${dutyRealPct.toFixed(dutyDec)}%`, w - 240, 24);
             }
         }
     }
@@ -226,8 +244,16 @@ document.addEventListener('DOMContentLoaded', () => {
             updateCalculationsAndPreview();
             if (isRunning) sendSigStart();
         });
+        // finished typing (blur/Enter): snap to the nearest attainable value
+        cfgSigFreq.addEventListener('change', () => {
+            const snapped = quantizeFreq(parseFloat(cfgSigFreq.value) || 1000);
+            cfgSigFreq.value = snapped;
+            if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(snapped);
+            updateCalculationsAndPreview();
+            if (isRunning) sendSigStart();
+        });
         cfgSigFreqRange.addEventListener('input', () => {
-            const freqHz = Math.min(42000000, Math.round(Math.pow(10, parseFloat(cfgSigFreqRange.value))));
+            const freqHz = quantizeFreq(Math.round(Math.pow(10, parseFloat(cfgSigFreqRange.value))));
             cfgSigFreq.value = freqHz;
             updateCalculationsAndPreview();
             if (isRunning) sendSigStart();
@@ -265,31 +291,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const isFast = e.shiftKey || e.ctrlKey;
         const currentFreq = Math.max(1, Math.min(42000000, parseFloat(cfgSigFreq?.value || 1000)));
 
+        // Classic linear ladder (unchanged UX), Shift/Ctrl = 5x
         let step = 1;
-        if (dir > 0) {
-            if (currentFreq < 100) step = 1;
-            else if (currentFreq < 1000) step = 10;
-            else if (currentFreq < 10000) step = 100;
-            else if (currentFreq < 100000) step = 1000;
-            else if (currentFreq < 1000000) step = 10000;
-            else if (currentFreq < 10000000) step = 100000;
-            else step = 1000000;
-        } else {
-            if (currentFreq <= 100) step = 1;
-            else if (currentFreq <= 1000) step = 10;
-            else if (currentFreq <= 10000) step = 100;
-            else if (currentFreq <= 100000) step = 1000;
-            else if (currentFreq <= 1000000) step = 10000;
-            else if (currentFreq <= 10000000) step = 100000;
-            else step = 1000000;
-        }
-
+        if (currentFreq < 100)          step = 1;
+        else if (currentFreq < 1000)    step = 10;
+        else if (currentFreq < 10000)   step = 100;
+        else if (currentFreq < 100000)  step = 1000;
+        else if (currentFreq < 1000000) step = 10000;
+        else if (currentFreq < 10000000) step = 100000;
+        else                            step = 1000000;
         if (isFast) step *= 5;
 
+        // Snap to the attainable staircase so the value is exactly reproducible
         const newFreq = Math.min(42000000, Math.max(1, currentFreq + dir * step));
-        if (cfgSigFreq) cfgSigFreq.value = newFreq;
-        updateCalculationsAndPreview();
-        debouncedSendSigStart();
+        let snapped = quantizeFreq(newFreq);
+
+        // Fine ladder steps can collapse into the same attainable entry
+        // (e.g. 1 MHz steps in the 12-28 MHz band, where the next entry is
+        // 14 MHz away): jump straight to the adjacent attainable entry.
+        if (snapped === currentFreq) {
+            const nxt = nextAttainable(currentFreq, dir);
+            if (nxt !== null) snapped = nxt;
+        }
+
+        if (cfgSigFreq && parseFloat(cfgSigFreq.value) !== snapped) {
+            cfgSigFreq.value = snapped;
+            if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(snapped);
+            updateCalculationsAndPreview();
+            debouncedSendSigStart();
+        }
     }
 
     function adjustDutyByWheel(e) {
@@ -329,8 +359,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => {
             const val = parseInt(btn.getAttribute('data-freq'));
             if (val && cfgSigFreq) {
-                cfgSigFreq.value = val;
-                if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(val);
+                const snapped = quantizeFreq(val);   // only truly attainable presets
+                cfgSigFreq.value = snapped;
+                if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(snapped);
                 updateCalculationsAndPreview();
                 if (isRunning) sendSigStart();
             }
@@ -344,8 +375,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bits && cfgSigFreq) {
                 const targetSteps = Math.pow(2, bits);
                 const freqHz = Math.round(84000000 / targetSteps);
-                cfgSigFreq.value = freqHz;
-                if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(freqHz);
+                const snapped = quantizeFreq(freqHz);
+                cfgSigFreq.value = snapped;
+                if (cfgSigFreqRange) cfgSigFreqRange.value = Math.log10(snapped);
                 updateCalculationsAndPreview();
                 if (isRunning) sendSigStart();
             }
@@ -354,8 +386,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Start / Stop Handlers ---
     if (btnSigStart) {
-        btnSigStart.addEventListener('click', () => {
-            if (!microTester || !microTester.device) return alert("Connect USB first!");
+        btnSigStart.addEventListener('click', async () => {
+            if (!microTester || !microTester.device) {
+                if (!microTester) return alert("Connect USB first!");
+                // Same UX as the oscilloscope: clicking Start opens the device picker
+                const ok = await microTester.connect();
+                if (!ok || !microTester.device) return alert("Connect USB first!");
+            }
 
             sendSigStart();
             isRunning = true;
@@ -463,13 +500,20 @@ document.addEventListener('DOMContentLoaded', () => {
         freqKnobThumb.setAttribute('cx', 50 + 40 * Math.cos(rad));
         freqKnobThumb.setAttribute('cy', 50 + 40 * Math.sin(rad));
         
-        // Update Text
-        if (freq >= 1e6) {
-            freqKnobText.innerHTML = (freq / 1e6).toFixed(2) + '<br><span style="font-size:12px; color: #94a3b8">MHz</span>';
-        } else if (freq >= 1e3) {
-            freqKnobText.innerHTML = (freq / 1e3).toFixed(2) + '<br><span style="font-size:12px; color: #94a3b8">kHz</span>';
+        // Update Text — the REAL frequency the timer generates (ARR-quantized).
+        // Decimal count follows the local attainable step, so any adjacent
+        // selectable value differs in the last displayed digit.
+        const real = pwmRealFreq(freq);
+        const nAdj = Math.max(2, Math.round(SIG_TIM_CLK / Math.max(1e-9, real)));
+        const gap = SIG_TIM_CLK / ((nAdj + 1) * nAdj);   // local attainable step
+        if (real >= 1e6) {
+            const dec = gap < 10 ? 4 : 2;
+            freqKnobText.innerHTML = (real / 1e6).toFixed(dec) + '<br><span style="font-size:12px; color: #94a3b8">MHz</span>';
+        } else if (real >= 1e3) {
+            const dec = gap < 0.01 ? 5 : (gap < 1 ? 4 : (gap < 120 ? 3 : 2));
+            freqKnobText.innerHTML = (real / 1e3).toFixed(dec) + '<br><span style="font-size:12px; color: #94a3b8">kHz</span>';
         } else {
-            freqKnobText.innerHTML = freq.toFixed(0) + '<br><span style="font-size:12px; color: #94a3b8">Hz</span>';
+            freqKnobText.innerHTML = real.toFixed(1) + '<br><span style="font-size:12px; color: #94a3b8">Hz</span>';
         }
     }
 
@@ -496,18 +540,87 @@ document.addEventListener('DOMContentLoaded', () => {
         lastKnobAngle = Math.atan2(clientY - centerY, clientX - centerX) * 180 / Math.PI;
     }
 
+    // Real (timer-quantized) frequency of the generated square wave.
+    // Exact mirror of STM32duino HardwareTimer::setOverflow(freq, HERTZ_FORMAT):
+    //   period_cyc = floor(84e6 / freq)            [timer ticks per period]
+    //   psc_factor = floor(period_cyc / 0x10000) + 1
+    //   ticks      = floor(period_cyc / psc_factor)
+    //   real       = 84e6 / (psc_factor * ticks)
+    // Every PWM pin here sits on TIM1/2/3/4, all clocked at 2x APB = 84 MHz on
+    // F401, so this function predicts the firmware output to the last Hz.
+    const SIG_TIM_CLK = 84000000;
+    // Exact firmware split for a requested frequency: prescaler factor and
+    // CCR-granularity ticks. setOverflow HERTZ_FORMAT computes
+    //   period_cyc = floor(84e6 / Hz);  psc = floor(pc / 65536) + 1;
+    //   ticks (ARR + 1) = floor(pc / psc)
+    // The duty compare register lives in this tick domain
+    // (firmware: compare = (ARR + 1) * duty% / 100), so duty precision is
+    // 100 / ticks percent per step and degrades as frequency grows.
+    function pwmPeriod(f) {
+        f = Math.round(Math.max(1, Math.min(42000000, f)) || 1);
+        const periodCyc = Math.max(1, Math.floor(SIG_TIM_CLK / f));
+        const psc = Math.floor(periodCyc / 0x10000) + 1;
+        return { psc, ticks: Math.max(1, Math.floor(periodCyc / psc)) };
+    }
+    function pwmRealFreq(f) {
+        const { psc, ticks } = pwmPeriod(f);
+        return SIG_TIM_CLK / (psc * ticks);
+    }
+    // Real duty the compare register yields for the input percent.
+    // Firmware: compare = floor((ARR + 1) * duty% / 100) (50% fixed for the
+    // square wave); CCR above ARR means constant high, so clamp to the period.
+    function dutyRealPercent(waveform, dutyIn, per) {
+        const dutyEff = (waveform === 0) ? 50 : dutyIn;
+        const compare = (waveform === 2) ? per.ticks : Math.floor((per.ticks + 1) * dutyEff / 100);
+        return 100 * Math.min(compare, per.ticks) / per.ticks;
+    }
+    // Nearest attainable ("staircase") frequency the timer can produce near
+    // the wanted value. Firmware decodes a sent integer Hz s into
+    //   period_cyc = floor(84e6 / s)  [runtime uint division]
+    // so the attainable staircase entries are the canonical sent values
+    //   s(n) = floor(84e6 / n)  for n = ticks per period (>= 2, cap 42 MHz).
+    // pwmRealFreq(s(n)) is a fixed point there: re-snapping never drifts the
+    // knob value (quantizeCore used twice settles rare sub-10 kHz pc shifts).
+    function quantizeCore(x) {
+        x = Math.max(1, Math.min(42000000, Math.round(x) || 1));
+        // n0 is the entry at/above x (CLK/n0 >= x); the entry below is n0+1.
+        // The n0-1 entry is always farther than n0 when x < CLK/n0, so two
+        // candidates suffice.
+        const n0 = Math.max(2, Math.floor(SIG_TIM_CLK / x));
+        let bestS = Math.floor(SIG_TIM_CLK / n0);          // entry at/above x
+        let bestErr = Math.abs(pwmRealFreq(bestS) - x);
+        const sDn = Math.floor(SIG_TIM_CLK / (n0 + 1));    // entry below x
+        const errDn = Math.abs(pwmRealFreq(sDn) - x);
+        if (errDn < bestErr) { bestErr = errDn; bestS = sDn; }
+        return bestS;
+    }
     function quantizeFreq(freq) {
-        freq = Math.max(1, Math.min(42000000, freq));
-        let step = 1;
-        if (freq < 100)           step = 1;           // 1 - 100 Hz -> 1 Hz
-        else if (freq < 1000)     step = 10;          // 100 - 1000 Hz -> 10 Hz
-        else if (freq < 10000)    step = 100;         // 1 - 10 kHz -> 100 Hz
-        else if (freq < 100000)   step = 1000;        // 10 - 100 kHz -> 1 kHz
-        else if (freq < 1000000)  step = 10000;       // 100 - 1000 kHz -> 10 kHz
-        else if (freq < 10000000) step = 100000;      // 1 - 10 MHz -> 100 kHz
-        else                      step = 1000000;     // 10 - 42 MHz -> 1 MHz
-
-        return Math.min(42000000, Math.max(1, Math.round(freq / step) * step));
+        freq = Math.max(1, Math.min(42000000, Math.round(freq) || 1));
+        // below ~13 kHz attainable entries are < 2 Hz apart (comparable with
+        // the floor-rounding offset of canonical sent values) — snapping there
+        // fights fractal pc-band edges; send the rounded value, the display
+        // still shows the firmware-exact real frequency.
+        if (freq < 13000) return freq;
+        // snap to the nearest canonical attainable entry (two candidate ticks:
+        // the packet above x and the one below; settle capped at 2 passes)
+        let s = quantizeCore(freq);
+        for (let i = 0; i < 2; i++) {
+            const t = quantizeCore(s);
+            if (t === s) break;
+            s = t;
+        }
+        return s;
+    }
+    // Jump target to the adjacent attainable entry (period = n timer ticks):
+    // filled in when a classic ladder step lands inside the same entry.
+    function nextAttainable(f, dir) {
+        f = Math.max(1, Math.min(42000000, Math.round(f) || 1));
+        const n = Math.max(2, Math.floor(SIG_TIM_CLK / f));
+        if (dir > 0) {
+            return n <= 2 ? null : Math.floor(SIG_TIM_CLK / (n - 1));   // cap 42 MHz
+        }
+        const s = Math.floor(SIG_TIM_CLK / (n + 1));
+        return s >= 1 ? s : null;
     }
 
     function handleKnobMove(e) {
@@ -566,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDutyDraggingPwm = false;
     let lastDutyAnglePwm = 0;
 
-    function updateDutyKnobPwmUI(duty) {
+    function updateDutyKnobPwmUI(duty, realPct, ticks) {
         if (!dutyKnobFillPwm || !dutyKnobThumbPwm || !dutyKnobTextPwm) return;
         const norm = Math.max(0, Math.min(100, duty)) / 100.0;
         const totalDash = 251.33;
@@ -577,7 +690,12 @@ document.addEventListener('DOMContentLoaded', () => {
         dutyKnobThumbPwm.setAttribute('cx', 50 + 40 * Math.cos(rad));
         dutyKnobThumbPwm.setAttribute('cy', 50 + 40 * Math.sin(rad));
 
-        dutyKnobTextPwm.innerHTML = Math.round(duty) + '<br><span style="font-size:12px; color: #94a3b8">%</span>';
+        // Text shows the REAL duty the compare register yields at this
+        // frequency (nominal display percent collapses into compare ticks),
+        // with enough decimals to distinguish adjacent attainable steps.
+        const shown = (realPct === undefined) ? Math.round(duty) : realPct;
+        const dec = ticks === undefined ? 0 : (ticks < 100 ? 2 : (ticks < 2000 ? 1 : 0));
+        dutyKnobTextPwm.innerHTML = shown.toFixed(dec) + '<br><span style="font-size:12px; color: #94a3b8">%</span>';
 
         if (dutyKnobPwm) {
             dutyKnobPwm.style.opacity = cfgSigDuty?.disabled ? '0.5' : '1';
@@ -648,12 +766,32 @@ document.addEventListener('DOMContentLoaded', () => {
         dutyKnobPwm.addEventListener('wheel', (e) => {
             if (cfgSigDuty?.disabled) return;
             e.preventDefault();
-            const step = e.shiftKey ? 5 : 1;
             const dir = e.deltaY < 0 ? 1 : -1;
+
+            // One wheel tick = one attainable duty step: 100/ticks percent,
+            // where ticks follow the current frequency (13% per tick at
+            // 10.5 MHz, 2% at 1 MHz, 1% below ~100 kHz). Ctrl/Shift = 5 ticks.
+            const freq = Math.max(1, Math.min(42000000, parseInt(cfgSigFreq?.value || '1000')));
+            const per = pwmPeriod(freq);
+            let step = Math.max(1, Math.ceil(100.0 / per.ticks));
+            if (e.shiftKey || e.ctrlKey) step *= 5;
+
             const currentDuty = Math.max(0, Math.min(100, parseFloat(cfgSigDuty?.value || 50)));
-            const newDuty = Math.max(0, Math.min(100, currentDuty + dir * step));
+            let newDuty = Math.max(0, Math.min(100, currentDuty + dir * step));
+
+            // Skip percent values that collapse into the same compare register
+            // value (no-op ticks at tick boundaries, e.g. 91%->100% at 8 ticks
+            // are both 100% real duty) so every wheel tick changes the output.
+            let guard = 0;
+            while (newDuty !== (dir > 0 ? 100 : 0) &&
+                   dutyRealPercent(1, newDuty, per) === dutyRealPercent(1, currentDuty, per) &&
+                   guard++ < 5) {
+                newDuty = Math.max(0, Math.min(100, newDuty + dir * step));
+            }
+
             if (cfgSigDuty) {
                 cfgSigDuty.value = newDuty;
+                if (cfgSigDutyRange) cfgSigDutyRange.value = newDuty;
                 cfgSigDuty.dispatchEvent(new Event('input'));
             }
         }, { passive: false });

@@ -3,8 +3,10 @@
 #include "adc_sampler.h"
 #include "pwm_gen.h"
 #include "sigma_delta_dac.h"
+#include "modulator.h"
 #include "comp_tester.h"
 #include "freq_resp.h"
+#include "sdr_rx.h"
 
 bool oscMode = false; // true = oscilloscope, false = voltmeter
 
@@ -71,7 +73,11 @@ void setup() {
   TinyUSBDevice.setManufacturerDescriptor("MicroTester Team");
   TinyUSBDevice.setProductDescriptor("MicroTester Board");
 
-  SerialTinyUSB.begin(115200);
+  // NOTE: CDC (SerialTinyUSB) intentionally removed from the build: the app
+  // never prints to it, all I/O goes through the usb_web vendor interface.
+  // build_opt.h sets -DCFG_TUD_CDC=0 to strip the CDC class driver (flash).
+  // To restore a debug console: re-add SerialTinyUSB.begin(115200) here,
+  // TinyUSB_Device_FlushCDC() in loop(), and drop the CFG_TUD_CDC=0 define.
 
   // Initialize LED (off until USB connected)
   set_board_led(false);
@@ -83,6 +89,7 @@ void setup() {
   adc_sampler_init();
   pwm_gen_init();
   sigma_delta_dac_init();
+  modulator_init();
   comp_tester_init();
   fr_init();
 }
@@ -90,7 +97,6 @@ void setup() {
 void loop() {
 #if defined(ARDUINO_ARCH_STM32)
   TinyUSB_Device_Task();
-  TinyUSB_Device_FlushCDC();
 #endif
 
   // Track USB connection state transitions independently
@@ -126,6 +132,20 @@ void loop() {
       cfg.oversample = payload[1];
       cfg.isOscilloscope = false;
       cfg.enableBias = (len >= 3) ? (payload[2] != 0) : false;
+      // Optional: [rateHz_b0..3 (len>=7)] [chunk_lo, chunk_hi (len>=9)]
+      // Defaults preserve legacy behavior: 10 kHz, 64 samples/packet.
+      cfg.voltRateHz = 10000;
+      cfg.voltChunk = 64;
+      if (len >= 7) {
+        cfg.voltRateHz = (uint32_t)payload[3] |
+                         ((uint32_t)payload[4] << 8) |
+                         ((uint32_t)payload[5] << 16) |
+                         ((uint32_t)payload[6] << 24);
+      }
+      if (len >= 9) {
+        cfg.voltChunk = (uint16_t)payload[7] | ((uint16_t)payload[8] << 8);
+      }
+      modulator_stop_if_adc_source();
       oscMode = false;
       adc_sampler_start(cfg);
     }
@@ -137,6 +157,7 @@ void loop() {
       adc_sampler_set_bias(payload[0] != 0);
     }
     else if (cmd == CMD_GET_VREF) {
+      modulator_stop_if_adc_source();
       adc_sampler_stop();
       uint32_t sum = adc_sampler_measure_vrefint_sum4096();
       
@@ -171,6 +192,7 @@ void loop() {
       }
       cfg.pin = (len >= 14) ? payload[13] : pin;
 
+      modulator_stop_if_adc_source();
       oscMode = true;
       adc_sampler_stop();
       adc_sampler_start(cfg);
@@ -188,6 +210,7 @@ void loop() {
                       ((uint32_t)payload[4] << 16) | 
                       ((uint32_t)payload[5] << 24);
       cfg.dutyCycle = payload[6];
+      modulator_stop_if_classd();
       pwm_gen_start(cfg);
     }
     else if (cmd == CMD_SIG_STOP) {
@@ -197,7 +220,8 @@ void loop() {
       uint8_t pin = payload[0];
       uint8_t prescalerExp = payload[1];
       uint16_t bufLen = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
-      
+
+      modulator_stop();  // same SPI1/DMA2-Stream3 + shared-pool slot
       sigma_delta_dac_prepare(pin, bufLen, prescalerExp);
 
       const uint8_t* bitstream = (len > 4) ? &payload[4] : NULL;
@@ -232,6 +256,7 @@ void loop() {
       sigma_delta_dac_stop();
     }
     else if (cmd == CMD_COMP_TEST) {
+      modulator_stop();
       adc_sampler_stop();
       oscMode = false;
       uint8_t mode = 0;
@@ -266,6 +291,7 @@ void loop() {
       pwm_gen_stop();
       sigma_delta_dac_stop();
       comp_tester_stop();
+      modulator_stop();
       oscMode = false;
       uint32_t limitHz = (len >= 6) ? ((uint32_t)payload[2] |
                           ((uint32_t)payload[3] << 8) |
@@ -309,10 +335,89 @@ void loop() {
     else if (cmd == CMD_FR_STOP) {
       fr_stop();
     }
+    else if (cmd == CMD_SDR_START && len >= 1) {
+      // SDR: stops every other streaming mode (same TIM2/DMA2/ADC1 resources)
+      adc_sampler_stop();
+      pwm_gen_stop();
+      sigma_delta_dac_stop();
+      comp_tester_stop();
+      fr_stop();
+      modulator_stop();
+      oscMode = false;
+      uint16_t fsKHz = (len >= 2) ? ((uint16_t)payload[0] | ((uint16_t)payload[1] << 8)) : 1000;
+      uint8_t wfFps = (len >= 3) ? payload[2] : 10;
+      uint8_t pinIdx = (len >= 4) ? payload[3] : 0;
+      uint8_t adcBits = (len >= 5) ? payload[4] : 8;
+      sdr_rx_start(fsKHz, wfFps, pinIdx, adcBits);
+    }
+    else if (cmd == CMD_SDR_STOP) {
+      sdr_rx_stop();
+    }
+    else if (cmd == CMD_SDR_TUNE && len >= 4) {
+      uint32_t fListen = (uint32_t)payload[0] |
+                         ((uint32_t)payload[1] << 8) |
+                         ((uint32_t)payload[2] << 16) |
+                         ((uint32_t)payload[3] << 24);
+      // Low-IF offset in Hz (default 8000; 0 = zero-IF direct conversion)
+      uint16_t if0Hz = (len >= 6) ? ((uint16_t)payload[4] | ((uint16_t)payload[5] << 8)) : 8000;
+      sdr_rx_tune(fListen, if0Hz);
+    }
+    else if (cmd == CMD_MOD_CONFIG && len >= 32) {
+      ModConfig mc;
+      mc.mode = payload[0];
+      mc.sideband = payload[1];
+      mc.source = payload[2];
+      mc.outPin = payload[3];
+      mc.adcPin = payload[4];
+      mc.prescalerExp = payload[5];
+      mc.normalizeOn = payload[6];
+      mc.biasOn = payload[7];
+      mc.carrierInc = (uint32_t)payload[8] |
+                      ((uint32_t)payload[9] << 8) |
+                      ((uint32_t)payload[10] << 16) |
+                      ((uint32_t)payload[11] << 24);
+      mc.modInc = (uint32_t)payload[12] |
+                  ((uint32_t)payload[13] << 8) |
+                  ((uint32_t)payload[14] << 16) |
+                  ((uint32_t)payload[15] << 24);
+      mc.depthQ15 = (uint16_t)payload[16] | ((uint16_t)payload[17] << 8);
+      mc.devInc = (uint32_t)payload[18] |
+                  ((uint32_t)payload[19] << 8) |
+                  ((uint32_t)payload[20] << 16) |
+                  ((uint32_t)payload[21] << 24);
+      mc.ssbLevelQ15 = (uint16_t)payload[22] | ((uint16_t)payload[23] << 8);
+      mc.gainQ8 = (uint16_t)payload[24] | ((uint16_t)payload[25] << 8);
+      mc.offsetQ7 = (int8_t)payload[26];
+      mc.normTargetPct = payload[27];
+      mc.classDCarrierHz = (uint32_t)payload[28] |
+                           ((uint32_t)payload[29] << 8) |
+                           ((uint32_t)payload[30] << 16) |
+                           ((uint32_t)payload[31] << 24);
+      modulator_apply(&mc);
+    }
+    else if (cmd == CMD_MOD_START) {
+      // Same exclusivity model as SDR/FR: shared SPI/DMA/TIM resources.
+      pwm_gen_stop();
+      sigma_delta_dac_stop();
+      comp_tester_stop();
+      fr_stop();
+      sdr_rx_stop();
+      if (modulator_source_is_adc()) {
+        adc_sampler_stop();
+        oscMode = false;
+      }
+      modulator_start();
+    }
+    else if (cmd == CMD_MOD_STOP) {
+      modulator_stop();
+    }
   }
 
   // 2. Run Sampler Loops
   comp_tester_loop();
+
+  // 2.5 SDR receiver streaming (no-op when inactive)
+  sdr_rx_loop();
 
   // 3.5 Check if ADC sampler has data available
   if (oscMode) {
@@ -337,7 +442,7 @@ void loop() {
         }
       }
     }
-  } else {
+  } else if (!(modulator_is_running() && modulator_source_is_adc())) {
     uint8_t* streamPtr;
     int streamCount = adc_sampler_get_available(&streamPtr);
     if (streamCount > 0) {
@@ -389,8 +494,10 @@ void line_state_callback(bool connected) {
   adc_sampler_stop();
   pwm_gen_stop();
   sigma_delta_dac_stop();
+  modulator_stop();
   comp_tester_stop();
   fr_stop();
+  sdr_rx_stop();
   oscMode = false;
 
   if (connected) {

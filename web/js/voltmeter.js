@@ -12,7 +12,9 @@ window.voltConfig = {
     mode: 'dc',         // 'dc' or 'ac'
     biasEnabled: false,  // PB9 bias state (Hi-Z)
     lastRawVin: 0.0,    // Uncalibrated Vin for zero offset calibration
-    channel: 0          // Currently selected channel
+    channel: 0,         // Currently selected channel
+    acRateHz: 10000,    // Voltmeter ADC sampling rate in Hz (firmware default 10 kHz)
+    acChunk: 64         // Voltmeter max samples per USB packet (firmware default 64)
 };
 
 // Alias for convenience
@@ -85,15 +87,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(updateZeroBadge, 1000);
     updateZeroBadge();
 
-    // Enable button if connected
-    setInterval(() => {
-        if (btnStartStop) {
-            btnStartStop.disabled = !microTester.device;
-        }
-    }, 1000);
-
-
-
+    // Start button stays clickable: no device -> opens the USB picker and
+    // switches straight into the mode (same UX as the FR sweep).
     // --- Voltage Range Preset ---
     const cfgVoltRange = document.getElementById('cfgVoltRange');
     function applySelectedRange() {
@@ -128,6 +123,38 @@ document.addEventListener('DOMContentLoaded', () => {
         applySelectedRange(); // Set initial range configuration
     }
 
+    // --- Helper: build CMD_VOLT_START payload (backward compatible) ---
+    // Layout: [pin, oversample, bias, rateHz_b0..3, chunk_lo, chunk_hi]
+    // Firmware defaults (short payload): 10 kHz, 64 samples/packet.
+    function readAcSettings() {
+        const rateEl = document.getElementById('cfgVoltAcRate');
+        const chunkEl = document.getElementById('cfgVoltAcChunk');
+        let rate = rateEl ? (parseInt(rateEl.value) || 10000) : 10000;
+        let chunk = chunkEl ? (parseInt(chunkEl.value) || 64) : 64;
+        if (rate < 1000) rate = 1000;
+        if (rate > 2400000) rate = 2400000;
+        if (chunk < 32) chunk = 32;
+        if (chunk > 1024) chunk = 1024;
+        voltConfig.acRateHz = rate;
+        voltConfig.acChunk = chunk;
+        return { rate, chunk };
+    }
+
+    function buildVoltStartPayload(pin, oversample, biasMode) {
+        const { rate, chunk } = readAcSettings();
+        const payload = new Uint8Array(9);
+        payload[0] = pin & 0xFF;
+        payload[1] = oversample & 0xFF;
+        payload[2] = biasMode ? 1 : 0;
+        payload[3] = rate & 0xFF;
+        payload[4] = (rate >> 8) & 0xFF;
+        payload[5] = (rate >> 16) & 0xFF;
+        payload[6] = (rate >> 24) & 0xFF;
+        payload[7] = chunk & 0xFF;
+        payload[8] = (chunk >> 8) & 0xFF;
+        return payload;
+    }
+
     // --- Helper: re-send voltmeter start command with current settings ---
     function reapplyIfRunning() {
         const oversample = parseInt(document.getElementById('cfgVoltOversampling').value) || 0;
@@ -144,7 +171,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const biasMode = voltConfig.biasEnabled ? 1 : 0;
         microTester.sendCommand(CMD_VOLT_STOP);
-        microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
+        microTester.sendCommand(CMD_VOLT_START, buildVoltStartPayload(pin, oversample, biasMode));
+        // Drop pre-switch samples: old-Fs and new-Fs must not mix in one RMS window
+        historyIdx = 0;
+        historyCount = 0;
     }
 
     // --- Live-apply: Channel & Oversampling & Sample Rate ---
@@ -164,11 +194,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cfgVoltSampleRate) {
         cfgVoltSampleRate.addEventListener('change', reapplyIfRunning);
     }
+    const cfgVoltAcRate = document.getElementById('cfgVoltAcRate');
+    if (cfgVoltAcRate) {
+        cfgVoltAcRate.addEventListener('change', reapplyIfRunning);
+    }
+    const cfgVoltAcChunk = document.getElementById('cfgVoltAcChunk');
+    if (cfgVoltAcChunk) {
+        cfgVoltAcChunk.addEventListener('change', reapplyIfRunning);
+    }
+    // Sync cached AC settings with UI defaults on load
+    readAcSettings();
 
     // --- Start / Stop ---
     if (btnStartStop) {
-        btnStartStop.addEventListener('click', () => {
-            if (!microTester.device) return alert("Connect USB first!");
+        btnStartStop.addEventListener('click', async () => {
+            if (!microTester.device) {
+                const ok = await microTester.connect();
+                if (!ok || !microTester.device) return alert("Connect USB first!");
+            }
             if (window.Calibration && window.Calibration._calibrationBusy) return alert("Calibration is currently in progress. Please wait until finished.");
 
             if (voltConfig.running) {
@@ -188,7 +231,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnStartStop.classList.add('btn-danger');
                 updateVoltIndicator();
 
-                microTester.sendCommand(CMD_VOLT_START, new Uint8Array([pin, oversample, biasMode]));
+                microTester.sendCommand(CMD_VOLT_START, buildVoltStartPayload(pin, oversample, biasMode));
+                historyIdx = 0;
+                historyCount = 0;
             }
         });
     }
@@ -206,6 +251,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateVoltIndicator();
     }
     window.stopVoltmeter = stopVoltmeter;
+
+    // USB unplug: stop the run and clear the green indicator dot
+    if (typeof microTester !== 'undefined' && microTester.addDisconnectListener) {
+        microTester.addDisconnectListener(() => stopVoltmeter());
+    }
 
     function updateVoltIndicator() {
         const voltIndicator = document.getElementById('voltIndicator');
@@ -293,17 +343,29 @@ function processVoltmeterData(payload) {
     if (now - (voltConfig.lastUiUpdate || 0) < 1000 / targetRate) return;
     voltConfig.lastUiUpdate = now;
 
-    // 2. Determine target oversampling count
-    const oversampleSetting = parseInt(document.getElementById('cfgVoltOversampling').value) || 6;
-    let targetSamples = 1;
+    // 2. Determine measurement windows.
+    // DC window = oversampling average (0 = off => latest single raw sample).
+    // AC window = same as DC, except when oversampling is off: then one USB
+    // chunk (AC Chunk setting) so RMS/Vpp/freq stay functional with minimal
+    // smearing. RMS over a single sample is identically 0, hence the split.
+    const _osRaw = parseInt(document.getElementById('cfgVoltOversampling').value);
+    const oversampleSetting = isNaN(_osRaw) ? 6 : _osRaw;
+    let chunkWin = voltConfig.acChunk || 64;
+    if (chunkWin < 8) chunkWin = 8;
+    if (chunkWin > 4096) chunkWin = 4096;
+    let dcSamples = 1;
     if (oversampleSetting > 0) {
-        targetSamples = 1 << (oversampleSetting * 2);
+        dcSamples = 1 << (oversampleSetting * 2);
     }
-    
-    if (targetSamples > historyCount) {
-        targetSamples = historyCount; // Wait until we have enough data
+    if (dcSamples > historyCount) {
+        dcSamples = historyCount; // Wait until we have enough data
     }
-    if (targetSamples === 0) return;
+    if (dcSamples === 0) return;
+    let acSamples = dcSamples;
+    if (oversampleSetting === 0) {
+        acSamples = Math.min(historyCount, chunkWin);
+        if (acSamples < 2) return; // need at least 2 samples for AC stats
+    }
 
     // Helper to convert raw ADC reading to Vin input voltage
     function rawToVin(raw) {
@@ -330,21 +392,26 @@ function processVoltmeterData(payload) {
         return f.toFixed(1) + ' Hz';
     }
 
-    // 3. Compute Stats over the target window
-    let sum = 0;
+    // 3. Compute stats: min/max/mean over the AC window (stable for auto-polarity
+    // and AC metrics even when DC readout is raw). DC value = AC mean, except
+    // when oversampling is off => latest single raw sample.
+    let sumAc = 0;
     let minRaw = 65535;
     let maxRaw = 0;
 
-    let readIdx = (historyIdx - targetSamples + MAX_HISTORY) % MAX_HISTORY;
-    for (let i = 0; i < targetSamples; i++) {
+    let readIdx = (historyIdx - acSamples + MAX_HISTORY) % MAX_HISTORY;
+    for (let i = 0; i < acSamples; i++) {
         const val = sampleHistory[readIdx];
-        sum += val;
+        sumAc += val;
         if (val < minRaw) minRaw = val;
         if (val > maxRaw) maxRaw = val;
         readIdx = (readIdx + 1) % MAX_HISTORY;
     }
 
-    const avgRaw = sum / targetSamples;
+    const acAvgRaw = sumAc / acSamples;
+    const latestRaw = sampleHistory[(historyIdx - 1 + MAX_HISTORY) % MAX_HISTORY];
+    const dcRaw = (oversampleSetting > 0) ? acAvgRaw : latestRaw;
+    const avgRaw = dcRaw; // legacy alias: single-sample consumers use DC value
 
     // Browser-Side Auto-Polarity via WebUSB CMD_VOLT_SET_BIAS (0x14)
     if (voltConfig.autoPolarity) {
@@ -355,9 +422,9 @@ function processVoltmeterData(payload) {
             voltConfig.gainRatio = 21.0;
             if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([1]));
         } 
-        // If bias is ON, 0V is ~1950. Floating is ~2048. 
-        // Turn OFF if avgRaw >= 2000 (meaning it's floating or positive).
-        else if (voltConfig.biasEnabled && avgRaw >= 2000) {
+        // If bias is ON, 0V is ~1950. Floating is ~2048.
+        // Turn OFF if AC-window mean >= 2000 (meaning it's floating or positive).
+        else if (voltConfig.biasEnabled && acAvgRaw >= 2000) {
             voltConfig.biasEnabled = false;
             voltConfig.gainRatio = 11.0;
             if (microTester.device) microTester.sendCommand(CMD_VOLT_SET_BIAS, new Uint8Array([0]));
@@ -371,42 +438,55 @@ function processVoltmeterData(payload) {
         voltConfig.lastRawVin = uncal;
     }
 
-    const vDc = rawToVin(avgRaw);
+    const vDc = rawToVin(dcRaw);
+    const acRef = rawToVin(acAvgRaw); // AC deviation reference (== vDc unless oversampling is off)
     const vMax = rawToVin(maxRaw);
     const vMin = rawToVin(minRaw);
     const vPP = Math.max(0, vMax - vMin);
 
-    // AC RMS (deviation from mean) & True RMS & Mean Crossings
+    // AC RMS (deviation from AC-window mean) & True RMS & Mean Crossings
     let sqSumAc = 0;
     let sqSumTrue = 0;
     let crossings = 0;
-    readIdx = (historyIdx - targetSamples + MAX_HISTORY) % MAX_HISTORY;
+    readIdx = (historyIdx - acSamples + MAX_HISTORY) % MAX_HISTORY;
     let prevVal = sampleHistory[readIdx];
 
-    for (let i = 0; i < targetSamples; i++) {
+    for (let i = 0; i < acSamples; i++) {
         const rawVal = sampleHistory[readIdx];
         const vin = rawToVin(rawVal);
         
-        sqSumAc += Math.pow(vin - vDc, 2);
+        sqSumAc += Math.pow(vin - acRef, 2);
         sqSumTrue += Math.pow(vin, 2);
 
-        if (i > 0 && prevVal < avgRaw && rawVal >= avgRaw) {
+        if (i > 0 && prevVal < acAvgRaw && rawVal >= acAvgRaw) {
             crossings++;
         }
         prevVal = rawVal;
         readIdx = (readIdx + 1) % MAX_HISTORY;
     }
 
-    const acRmsVolts = Math.sqrt(sqSumAc / targetSamples);
-    const trueRmsVolts = Math.sqrt(sqSumTrue / targetSamples);
+    const acRmsVolts = Math.sqrt(sqSumAc / acSamples);
+    const trueRmsVolts = Math.sqrt(sqSumTrue / acSamples);
 
-    // Crest Factor: Vpeak / VacRms
-    const vPeak = Math.max(Math.abs(vMax - vDc), Math.abs(vMin - vDc));
+    // Crest Factor: Vpeak / VacRms (peaks relative to AC mean)
+    const vPeak = Math.max(Math.abs(vMax - acRef), Math.abs(vMin - acRef));
     const crestFactor = acRmsVolts > 0.005 ? (vPeak / acRmsVolts) : 0;
 
-    // Frequency estimate (Voltmeter hardware rate is 10kHz = 10000 SPS)
-    const timeSpanSec = targetSamples / 10000.0;
+    // Frequency estimate using the actual ADC rate (default 10 kHz = 10000 SPS).
+    // Nyquist limit is Fs/2; higher Fs extends measurable AC bandwidth.
+    const adcRateHz = voltConfig.acRateHz || 10000;
+    const timeSpanSec = acSamples / adcRateHz;
     const acFreq = (vPP > 0.05 && crossings > 0 && timeSpanSec > 0) ? (crossings / timeSpanSec) : 0;
+
+    // Show actual hardware rate + Nyquist in the status bar.
+    // Above ~200-400 kHz USB FS can't stream every sample: best-effort,
+    // amplitude stats stay roughly valid (random subsample), freq is approximate.
+    const elSps = document.getElementById('voltSampleRate');
+    if (elSps) {
+        const nyq = adcRateHz / 2;
+        const fmtHz = (hz) => hz >= 1000000 ? ((hz / 1000000).toFixed(2) + 'M') : (hz >= 1000 ? ((hz / 1000).toFixed(hz % 1000 ? 1 : 0) + 'k') : String(hz));
+        elSps.innerText = fmtHz(adcRateHz) + 'sps / Nyq ' + fmtHz(nyq) + 'Hz' + (adcRateHz > 400000 ? ' (best-effort)' : '');
+    }
 
     voltConfig.lastRawVin = rawToVin(avgRaw) + (voltConfig.zeroOffset || 0);
 

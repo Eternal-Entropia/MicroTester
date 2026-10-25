@@ -14,6 +14,42 @@ function getCompXcFreq() {
     return v;
 }
 
+// Resistor color-band rounding (Settings panel, PC-side only).
+// Snaps the measured value to a standard E-series ONLY for the color-band
+// picture calculation; the displayed measurement is never altered.
+const RESISTOR_BAND_ROUNDINGS = ['off', 'E12', 'E24', 'E48', 'E96'];
+function getResistorBandRounding() {
+    const v = localStorage.getItem('microtester_resistor_band_rounding');
+    if (RESISTOR_BAND_ROUNDINGS.indexOf(v) === -1) return 'E12';
+    return v;
+}
+
+// Standard E-series mantissas (1.0 .. 9.99 per decade)
+const E_SERIES_TABLES = {
+    E12: [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2],
+    E24: [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1],
+    E48: [1.00, 1.05, 1.10, 1.15, 1.21, 1.27, 1.33, 1.40, 1.47, 1.54, 1.62, 1.69, 1.78, 1.87, 1.96, 2.05, 2.15, 2.26, 2.37, 2.49, 2.61, 2.74, 2.87, 3.01, 3.16, 3.32, 3.48, 3.65, 3.83, 4.02, 4.22, 4.42, 4.64, 4.87, 5.11, 5.36, 5.62, 5.90, 6.19, 6.49, 6.81, 7.15, 7.50, 7.87, 8.25, 8.66, 9.09, 9.53],
+    E96: [1.00, 1.02, 1.05, 1.07, 1.10, 1.13, 1.15, 1.18, 1.21, 1.24, 1.27, 1.30, 1.33, 1.37, 1.40, 1.43, 1.47, 1.50, 1.54, 1.58, 1.62, 1.65, 1.69, 1.74, 1.78, 1.82, 1.87, 1.91, 1.96, 2.00, 2.05, 2.10, 2.15, 2.21, 2.26, 2.32, 2.37, 2.43, 2.49, 2.55, 2.61, 2.67, 2.74, 2.80, 2.87, 2.94, 3.01, 3.09, 3.16, 3.24, 3.32, 3.40, 3.48, 3.57, 3.65, 3.74, 3.83, 3.92, 4.02, 4.12, 4.22, 4.32, 4.42, 4.53, 4.64, 4.75, 4.87, 4.99, 5.11, 5.23, 5.36, 5.49, 5.62, 5.76, 5.90, 6.04, 6.19, 6.34, 6.49, 6.65, 6.81, 6.98, 7.15, 7.32, 7.50, 7.68, 7.87, 8.06, 8.25, 8.45, 8.66, 8.87, 9.09, 9.31, 9.53, 9.76]
+};
+
+// Nearest E-series value for val_ohm (in ohms). Returns val_ohm unchanged when
+// rounding is off/unknown or the value is not positive.
+function snapResistanceToESeries(val_ohm, series) {
+    const table = E_SERIES_TABLES[series];
+    if (!table || !val_ohm || val_ohm <= 0) return val_ohm;
+    const exp = Math.floor(Math.log10(val_ohm));
+    const mant = val_ohm / Math.pow(10, exp); // [1, 10)
+    let best = table[0];
+    let bestDiff = Math.abs(mant - table[0]);
+    for (let i = 1; i < table.length; i++) {
+        const d = Math.abs(mant - table[i]);
+        if (d < bestDiff) { bestDiff = d; best = table[i]; }
+    }
+    // Mantissa near 10 belongs to the next decade (1.0 x 10^(exp+1))
+    if (Math.abs(mant - 10) < bestDiff) return Math.pow(10, exp + 1);
+    return best * Math.pow(10, exp);
+}
+
 // Payload: [mode, oversampleLo, oversampleHi] (firmware falls back to 128 on short payloads)
 function buildCompTestPayload(mode) {
     const ov = getCompOversample();
@@ -35,13 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let testing = false;
     let compTestTimeoutTimer = null;
+    let lastCompResult = null; // last parsed result, for live re-render on picture-only setting changes
 
-    // Enable/disable based on USB connection
-    setInterval(() => {
-        if (btnTest) btnTest.disabled = !microTester.device || testing;
-        if (btnSmallCap) btnSmallCap.disabled = !microTester.device || testing;
-    }, 1000);
-
+    // Start buttons stay clickable: no device -> open the USB picker, then
+    // run the test immediately (same UX as the FR sweep). During a test they
+    // are re-disabled by the handlers themselves.
     function updateCompIndicator(active) {
         const compIndicator = document.getElementById('compIndicator');
         if (compIndicator) {
@@ -85,6 +119,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Also apply on Enter without blurring
         cfgCompFreq.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') applyFreqInput();
+        });
+    }
+
+    // --- Resistor color-band rounding (Settings panel, picture only) ---
+    const cfgResistorBandRounding = document.getElementById('cfgResistorBandRounding');
+    if (cfgResistorBandRounding) {
+        const savedRounding = localStorage.getItem('microtester_resistor_band_rounding');
+        if (savedRounding && RESISTOR_BAND_ROUNDINGS.indexOf(savedRounding) !== -1) {
+            cfgResistorBandRounding.value = savedRounding;
+        } else {
+            cfgResistorBandRounding.value = getResistorBandRounding(); // default E12
+        }
+        cfgResistorBandRounding.addEventListener('change', () => {
+            let v = cfgResistorBandRounding.value;
+            if (RESISTOR_BAND_ROUNDINGS.indexOf(v) === -1) v = 'off';
+            cfgResistorBandRounding.value = v;
+            localStorage.setItem('microtester_resistor_band_rounding', v);
+            // Live-refresh the already displayed resistor picture (no re-measure)
+            if (lastCompResult && lastCompResult.type === 10) {
+                displayResult(lastCompResult);
+            }
         });
     }
 
@@ -193,8 +248,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Start test (Normal)
     if (btnTest) {
-        btnTest.addEventListener('click', () => {
-            if (!microTester.device) return alert('Connect USB first!');
+        btnTest.addEventListener('click', async () => {
+            if (!microTester.device) {
+                const ok = await microTester.connect();
+                if (!ok || !microTester.device) return alert('Connect USB first!');
+            }
             stopActiveInstruments();
             if (typeof window.Calibration !== 'undefined' && typeof window.Calibration.sendCompCalToFirmware === 'function') {
                 window.Calibration.sendCompCalToFirmware();
@@ -229,8 +287,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Start test (Small Cap Mode)
     if (btnSmallCap) {
-        btnSmallCap.addEventListener('click', () => {
-            if (!microTester.device) return alert('Connect USB first!');
+        btnSmallCap.addEventListener('click', async () => {
+            if (!microTester.device) {
+                const ok = await microTester.connect();
+                if (!ok || !microTester.device) return alert('Connect USB first!');
+            }
             stopActiveInstruments();
             if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             testing = true;
@@ -260,18 +321,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Cancel test
+    function compStop(statusText) {
+        if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
+        microTester.sendCommand(CMD_COMP_STOP);
+        testing = false;
+        lastEsrTable = null;
+        updateCompIndicator(false);
+        statusEl.innerText = statusText || 'Cancelled';
+        statusEl.className = 'comp-status idle';
+        btnTest.disabled = false;
+        if (btnSmallCap) btnSmallCap.disabled = false;
+    }
+
     if (btnStop) {
         btnStop.addEventListener('click', () => {
-            if (compTestTimeoutTimer) { clearTimeout(compTestTimeoutTimer); compTestTimeoutTimer = null; }
             compLog('[TX] CMD_COMP_STOP (User Cancelled)', 'warn');
-            microTester.sendCommand(CMD_COMP_STOP);
-            testing = false;
-            updateCompIndicator(false);
-            statusEl.innerText = 'Cancelled';
-            statusEl.className = 'comp-status idle';
-            btnTest.disabled = false;
-            if (btnSmallCap) btnSmallCap.disabled = false;
+            compStop('Cancelled');
         });
+    }
+
+    // USB unplug: cancel the run and clear the green indicator dot
+    if (typeof microTester !== 'undefined' && microTester.addDisconnectListener) {
+        microTester.addDisconnectListener(() => { if (testing) compStop('Disconnected'); });
     }
 
     // ESR table cache (PKT_COMP_ESR_TABLE arrives before PKT_COMP_RESULT).
@@ -391,6 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnTest.disabled = false;
         if (btnSmallCap) btnSmallCap.disabled = false;
 
+        lastCompResult = result;
         displayResult(result);
     });
 
@@ -791,13 +863,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Build SVG schematic diagrams
+    // Suffix for the band legend when rounding is active, e.g. " (≈ 1 kΩ E24)".
+    // The big value text always shows the exact measured resistance.
+    function bandRoundingSuffix(measured_ohm, snapped_ohm, rounding) {
+        if (!rounding || rounding === 'off') return '';
+        if (!measured_ohm || !snapped_ohm || measured_ohm <= 0) return '';
+        if (Math.abs(snapped_ohm - measured_ohm) / measured_ohm < 1e-9) return '';
+        return ' (≈ ' + formatResistance(snapped_ohm * 100) + ' ' + rounding + ')';
+    }
+
     function buildResistorDiagram(r) {
         const probes = ['TP1 (PA7)', 'TP2 (PA6)', 'TP3 (PA5)'];
         let rOffset = 0;
         if (typeof window.Calibration !== 'undefined' && window.Calibration.compOffsetR) {
             rOffset = window.Calibration.compOffsetR;
         }
-        const r1_ohm = Math.max(0, r.value1 - rOffset) / 100.0;
+        const rounding = getResistorBandRounding();
+        const r1measured_ohm = Math.max(0, r.value1 - rOffset) / 100.0;
+        const r1_ohm = snapResistanceToESeries(r1measured_ohm, rounding);
         const bands1 = getResistorColorBands(r1_ohm) || [
             { name: 'Brown', hex: '#854d0e', border: '#a16207' },
             { name: 'Black', hex: '#1e293b', border: '#475569' },
@@ -806,8 +889,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
 
         if (r.value2 > 0) {
-            const r2_ohm = Math.max(0, r.value2 - rOffset) / 100.0;
+            const r2measured_ohm = Math.max(0, r.value2 - rOffset) / 100.0;
+            const r2_ohm = snapResistanceToESeries(r2measured_ohm, rounding);
             const bands2 = getResistorColorBands(r2_ohm) || bands1;
+            const legend1 = bands1.map(b => b.name).join(' • ') + bandRoundingSuffix(r1measured_ohm, r1_ohm, rounding);
+            const legend2 = bands2.map(b => b.name).join(' • ') + bandRoundingSuffix(r2measured_ohm, r2_ohm, rounding);
 
             // Dual Resistor schematic (3 probes) with realistic color bands
             return `<svg viewBox="0 0 280 115" class="comp-schematic">
@@ -843,10 +929,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <!-- Values & Color codes -->
                 <text x="78" y="78" fill="#f59e0b" font-size="11" font-weight="bold" text-anchor="middle">R1: ${formatResistance(r.value1)}</text>
-                <text x="78" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${bands1.map(b => b.name).join(' • ')}</text>
+                <text x="78" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${legend1}</text>
                 
                 <text x="202" y="78" fill="#10b981" font-size="11" font-weight="bold" text-anchor="middle">R2: ${formatResistance(r.value2)}</text>
-                <text x="202" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${bands2.map(b => b.name).join(' • ')}</text>
+                <text x="202" y="96" fill="#94a3b8" font-size="8.5" font-weight="600" text-anchor="middle">${legend2}</text>
             </svg>`;
         } else {
             // Single Resistor schematic with dynamic color bands
@@ -872,7 +958,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 <!-- Value and Color names legend -->
                 <text x="120" y="80" fill="#38bdf8" font-size="12" font-weight="bold" text-anchor="middle">${formatResistance(r.value1)}</text>
-                <text x="120" y="96" fill="#94a3b8" font-size="9.5" font-weight="600" text-anchor="middle">${bands1.map(b => b.name).join(' • ')}</text>
+                <text x="120" y="96" fill="#94a3b8" font-size="9.5" font-weight="600" text-anchor="middle">${bands1.map(b => b.name).join(' • ') + bandRoundingSuffix(r1measured_ohm, r1_ohm, rounding)}</text>
             </svg>`;
         }
     }

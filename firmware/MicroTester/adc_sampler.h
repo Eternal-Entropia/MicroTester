@@ -16,6 +16,8 @@ typedef struct {
     uint8_t trigMode;
     uint16_t reqSamples;
     uint8_t sessionId;
+    uint32_t voltRateHz;  // Voltmeter ADC rate in Hz (default 10000). Optional, host may omit.
+    uint16_t voltChunk;   // Voltmeter max samples per USB packet (default 64). Optional.
 } AdcConfig;
 
 void adc_sampler_init();

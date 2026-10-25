@@ -1,5 +1,5 @@
 // MicroTester Progressive Web App - Service Worker
-const CACHE_NAME = 'microtester-rv1.4';
+const CACHE_NAME = 'microtester-rv1.5-conn35';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -13,10 +13,12 @@ const ASSETS_TO_CACHE = [
   'js/voltmeter.js',
   'js/oscilloscope.js',
   'js/comp_tester.js',
-  'js/pwm_generator.js',
-  'js/signal_generator.js',
+  'js/pwm_generator.js?v=5',
+  'js/signal_generator.js?v=3',
   'js/logger.js?v=2',
-  'js/freqresp.js',
+  'js/freqresp.js?v=61',
+  'js/sdr.js?v=24',
+  'js/modulator.js?v=4',
   'js/calibration.js',
   'js/usb_protocol.js',
   'js/dfu.js',

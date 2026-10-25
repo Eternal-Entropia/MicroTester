@@ -85,6 +85,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3. DC/AC Mode Toggle
     const modeToggle = document.getElementById('modeToggle');
+    // AC-only settings (ADC rate + chunk) are hidden in DC mode
+    function updateAcSettingsVisibility(value) {
+        const show = (value === 'ac');
+        const rateField = document.getElementById('cfgVoltAcRateField');
+        const chunkField = document.getElementById('cfgVoltAcChunkField');
+        if (rateField) rateField.style.display = show ? '' : 'none';
+        if (chunkField) chunkField.style.display = show ? '' : 'none';
+    }
+    window.updateAcSettingsVisibility = updateAcSettingsVisibility;
     if (modeToggle) {
         const options = modeToggle.querySelectorAll('.mode-toggle-option');
         options.forEach(opt => {
@@ -106,8 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (acCard) {
                     acCard.style.display = (value === 'ac') ? 'block' : 'none';
                 }
+                updateAcSettingsVisibility(value);
             });
         });
+        // Initial state (default DC)
+        const initMode = (window.voltConfig && window.voltConfig.mode)
+            || modeToggle.getAttribute('data-mode') || 'dc';
+        updateAcSettingsVisibility(initMode);
     }
     
     // Bias Toggle is handled by voltmeter.js

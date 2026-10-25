@@ -20,6 +20,7 @@
         syncPending: false,
         oversample: 0,
         sampleRateKHz: 100,   // default (100 kHz), synced from UI select at init
+        acqMode: 'realtime', // Real-time | ETS | Auto HF | Aliasing | Undersample (Mode selector)
         vRef: 3.3,
         adcRes: 4095,         // 12-bit resolution
         divider: 1.0,
@@ -49,6 +50,33 @@
         currentFrame: null,
         isEts: false,          // true when equivalent-time sampling is active
         reqSamplesSent: 0,     // reqSamples sent to firmware (for decimation time base)
+
+        // Auto Aliasing (undersampling heterodyne): sampler is the mixer, LO = Fs.
+        // Carrier is solved on the host from aliases at several rates (sine ≤ ~12 MHz).
+        aliasMode: false,      // display stream carries an aliased waveform + carrier estimate
+        aliasFreqHz: 0,        // estimated true carrier frequency (0 = no signal / not solved)
+        aliasAmbiguous: false, // true when several carriers explain the aliases
+        aliasScanning: false,  // true while the multi-rate scan is in progress
+        aliasScanIdx: 0,       // 1-based scan point index for the overlay (0 = idle)
+        aliasScanTot: 0,       // total scan points in the current run
+        aliasPts: 0,           // usable alias points produced by the last scan (0..4)
+
+        // Undersampling (bandpass sampling): Fs is placed so the known carrier
+        // lands at Fs/4 of a Nyquist zone; the shown wave IS the downconverted
+        // signal (time-reversed when the zone is odd). usMode: null|'manual'|'auto'.
+        usMode: null,
+        usLocked: false,       // true once Fs is locked to a zone
+        usScanning: false,
+        usFcHz: 0,             // carrier the lock was planned from
+        usFcEstHz: 0,          // live carrier estimate (lock readout tracking)
+        usAmbiguous: false,    // auto mode: solver was ambiguous
+        usFsKHz: 0, usFsHz: 0, // locked sample rate
+        usK: 0, usS: 1,        // fold branch: carrier ≈ usK*usFsHz + usS*IF
+        usZone: 0, usMirrored: false,
+        usTargetIFHz: 0,       // planned IF (Fs/4)
+        usLastRecenter: 0,     // throttle for drift re-lock restarts
+        usSavedCh: null,       // channel selection saved before forcing single-ch
+        usSavedTrig: null, usSavedRes: null, usSavedAdc: null,
 
         // Actual PC Rate
         actualRateSamples: 0,
@@ -165,6 +193,15 @@
         const sel = document.getElementById('cfgOscVoltRange');
         if (sel) return sel.value === '±30';
         return oscState.divider > 1.0;
+    }
+
+    // Acquisition mode: ETS is explicit (oscState.acqMode from the Mode selector),
+    // never inferred from the rate number; multi-channel always forces realtime.
+    // Falls back to the legacy rate threshold before UI init.
+    function isEtsMode() {
+        if (oscState.multiChannel) return false;
+        if (oscState.acqMode) return oscState.acqMode === 'ets';
+        return oscState.sampleRateKHz >= 5000;
     }
 
     function getRateZeroModeCount(ch) {
@@ -411,8 +448,7 @@
         let freq = 0, period = 0, duty = 0;
 
         if (vPP_raw > 0.05) {
-            const reqRate = oscState.sampleRateKHz;
-            const isEts = reqRate >= 5000;
+            const isEts = isEtsMode();
             const isDecimated = !isEts && (samples.length === 1600);
 
             const wave = [];
@@ -555,8 +591,12 @@
             }
         }
 
+        // Flag Min/Max-decimated frames: freq/duty there come from the midpoint
+        // envelope, not raw samples — consumers must not trust them for IF readout.
+        const frameDecimated = !isEtsMode() && samples.length === 1600;
+
         // Return the absolute peak-to-peak for UI, as is standard
-        return { vMin, vMax, vPP: vPP_raw, vAvg, freq, period, duty };
+        return { vMin, vMax, vPP: vPP_raw, vAvg, freq, period, duty, decimated: frameDecimated };
     }
 
     // ======================== Canvas Rendering ========================
@@ -729,7 +769,7 @@
         const centerV = oscState.yOffset * oscState.voltsPerDiv;
 
         // ETS only runs single-channel. Multi-channel and realtime use trigger-at-center.
-        const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
+        const isEts = isEtsMode();
 
         // Target trigger position: locked at index 0 for ETS, 50% center for non-ETS
         const targetTrigPx = isEts ? 0 : (w * 0.5);
@@ -828,7 +868,7 @@
         // In realtime mode (single OR multi-channel), timePerDiv reflects the actual sample rate directly.
         const numCh = oscState.multiChannel ? Math.max(1, oscState.activeChannels.length) : 1;
         const perChRateKHz = oscState.sampleRateKHz;   // per-channel rate requested (multi-mode: ADC interleaves, each channel gets this rate)
-        const isEts = !oscState.multiChannel && perChRateKHz >= 5000;
+        const isEts = isEtsMode();
         const truePerChRateKHz = isEts ? Math.min(perChRateKHz, 6000) : perChRateKHz;
         const frameSamples = (oscState.currentFrame && oscState.currentFrame.length > 0) ? oscState.currentFrame.length : 1600;
         const effTimePerDiv = isEts
@@ -871,13 +911,49 @@
             ctx.fillText('■ STOP', w - 60, 14);
         }
 
-        if (oscState.sampleRateKHz >= 5000) {
+        if (isEtsMode()) {
             ctx.fillStyle = '#8b5cf6';
             ctx.fillText('ETS', w - 60, 42);
         }
 
-        // Bias state indicator (auto-polarity mode)
-        if (oscState.autoPolarity && isOsc30VMode()) {
+        if (oscState.aliasMode) {
+            ctx.fillStyle = '#8b5cf6';
+            const aHz = oscState.aliasFreqHz || 0;
+            const aTxt = aHz > 0
+                ? ('≈ ' + (aHz >= 1000000 ? (aHz / 1000000).toFixed(2) + ' MHz' : (aHz / 1000).toFixed(1) + ' kHz'))
+                : (oscState.aliasPts === 1 ? 'weak (1 pt)' : 'no signal');
+            ctx.fillText('ALIAS ' + aTxt + (oscState.aliasAmbiguous ? ' ?' : ''), w - 60, 70);
+        }
+
+        if (oscState.usMode) {
+            ctx.fillStyle = '#8b5cf6';
+            let uTxt;
+            if (!oscState.usLocked) {
+                uTxt = (oscState.usMode === 'auto' ? 'AUTO-HF' : 'US') + ' no lock';
+            } else if (oscState.usMode === 'aliasman') {
+                const f = oscState.usFcEstHz || 0;
+                uTxt = 'ALIAS-M ' + (f > 0
+                    ? (f >= 1000000 ? (f / 1000000).toFixed(2) + ' MHz' : (f / 1000).toFixed(1) + ' kHz')
+                    : 'no signal') + ' z' + oscState.usZone + (oscState.usMirrored ? ' MIR' : '');
+            } else {
+                const f = oscState.usFcEstHz || oscState.usFcHz;
+                const fTxt = f >= 1000000 ? (f / 1000000).toFixed(2) + ' MHz' : (f / 1000).toFixed(1) + ' kHz';
+                const ifTxt = oscState.usTargetIFHz >= 1000 ? (oscState.usTargetIFHz / 1000).toFixed(0) + 'k' : oscState.usTargetIFHz.toFixed(0);
+                uTxt = 'US ' + fTxt + ' z' + oscState.usZone + (oscState.usMirrored ? ' MIR' : '') + ' IF' + ifTxt;
+            }
+            ctx.fillText(uTxt + (oscState.usAmbiguous ? ' ?' : ''), w - 60, 70);
+        }
+
+        // Multi-rate scan progress (Auto Aliasing / Auto HF)
+        if (oscState.aliasScanning || oscState.usScanning) {
+            ctx.fillStyle = '#f59e0b';
+            const n = oscState.aliasScanIdx || 0;
+            const tot = oscState.aliasScanTot || 4;
+            ctx.fillText('SCAN ' + n + '/' + tot, w - 60, 84);
+        }
+
+        // Bias state indicator (30V modes; static ON in Forced Bias, switching in Auto-Polarity)
+        if (isOsc30VMode()) {
             ctx.fillStyle = oscState.biasEnabled ? '#22c55e' : '#64748b';
             ctx.fillText(oscState.biasEnabled ? 'BIAS ON' : 'BIAS OFF', w - 60, 56);
         }
@@ -946,14 +1022,14 @@
             drawStatusOverlay(w, h);
 
             if (measSamples.length > 10) {
-                const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
+                const isEts = isEtsMode();
                 const rateKHz = isEts ? Math.min(oscState.sampleRateKHz, 6000) : oscState.sampleRateKHz;
                 const sampleRate = rateKHz * 1000;
                 const meas = computeMeasurements(measSamples, sampleRate);
                 updateMeasurementsUI(meas);
             }
         } else {
-            const displaySamples = oscState.currentFrame || new Float64Array(0);
+            const displaySamples = usViewSamples(oscState.currentFrame || new Float64Array(0));
 
             let triggerRes = { index: -1, frac: 0 };
             if (displaySamples.length > 0) {
@@ -977,7 +1053,7 @@
 
             // Update measurements
             if (displaySamples.length > 10) {
-                const isEts = !oscState.multiChannel && oscState.sampleRateKHz >= 5000;
+                const isEts = isEtsMode();
                 const rateKHz = isEts ? Math.min(oscState.sampleRateKHz, 6000) : oscState.sampleRateKHz;
                 const sampleRate = rateKHz * 1000;
                 const meas = computeMeasurements(displaySamples, sampleRate);
@@ -988,12 +1064,542 @@
         oscState.animFrameId = requestAnimationFrame(renderFrame);
     }
 
+    // ======================== Auto Aliasing (undersampling heterodyne) ========================
+    // No extra hardware: the ADC sampler is the mixer, TIM2 rate Fs is the LO,
+    // the measured alias fa = |f - round(f/Fs)*Fs| folded to [0, Fs/2] is the IF.
+    // The host solves for the carrier f from aliases taken at several rates.
+    // Limits: stable periodic input (sine best); solver grid 0..ALIAS_FMAX_HZ;
+    // above ~12 MHz the F401 track-and-hold rolls off and aliases get unreliable.
+    // ===== AutoAliasingSolverBegin =====
+    const ALIAS_FMAX_HZ = 12000000; // ~12 MHz max identifiable carrier
+    // Scan rates are deliberately NOT harmonically nested (their joint fold-over
+    // period is far above Fmax): with nested rates like 500/1000/2000 every carrier
+    // would be indistinguishable from f ± 2 MHz, making the solver useless.
+    // Four rates make exact collisions (same aliases at ALL rates) vanishingly rare.
+    // All ≤ 2800 kHz (12-bit realtime ceiling).
+    const ALIAS_SCAN_RATES_KHZ = [600, 1300, 1900, 2700]; // 12-bit scan rates for the solver
+    const ALIAS_GRID_STEP_HZ = 1000;
+    // Raw capture size per scan point. req <= 800 keeps the firmware in the raw
+    // path (no Min/Max decimation), whose midpoint envelope distorts fa.
+    const ALIAS_SCAN_REQ_SAMPLES = 700;
+    function aliasPredictHz(fHz, fsHz) {
+        const k = Math.round(fHz / fsHz);
+        const d = Math.abs(fHz - k * fsHz);
+        return Math.min(d, fsHz - d);
+    }
+    // meas: [{fsHz, faHz}] with faHz in [0, fsHz/2].
+    // Returns {fHz, ok, matches, err}. ok=false when fewer than all rates match
+    // or a runner-up carrier explains the aliases almost as well (genuine
+    // fold-over ambiguity — physics, not a bug; shown with a '?' badge).
+    function aliasSolveEstimate(meas, fMaxHz) {
+        const fMax = fMaxHz || ALIAS_FMAX_HZ;
+        if (!meas || meas.length === 0) return { fHz: 0, ok: false, matches: 0, err: Infinity };
+        const tols = meas.map(m => Math.max(1500, 0.04 * m.faHz));
+        const score = (f) => {
+            let matches = 0, err = 0;
+            for (let i = 0; i < meas.length; i++) {
+                const e = Math.abs(aliasPredictHz(f, meas[i].fsHz) - meas[i].faHz);
+                if (e <= tols[i]) { matches++; err += e / tols[i]; }
+                else { err += 1 + e / tols[i]; }
+            }
+            return { matches, err };
+        };
+        const better = (a, b) => {
+            if (!b) return true;
+            if (a.matches !== b.matches) return a.matches > b.matches;
+            return a.err < b.err;
+        };
+        let best = null;
+        for (let f = 0; f <= fMax; f += ALIAS_GRID_STEP_HZ) {
+            const s = score(f);
+            const cand = { fHz: f, matches: s.matches, err: s.err };
+            if (better(cand, best)) best = cand;
+        }
+        // Refine around the winner (±1 grid step, 100 Hz)
+        if (best) {
+            for (let f = Math.max(0, best.fHz - ALIAS_GRID_STEP_HZ); f <= best.fHz + ALIAS_GRID_STEP_HZ; f += 100) {
+                const s = score(f);
+                if (s.matches > best.matches || (s.matches === best.matches && s.err < best.err)) {
+                    best = { fHz: f, matches: s.matches, err: s.err };
+                }
+            }
+        }
+        // Runner-up must be a DISTINCT carrier, not a grid neighbour of the winner
+        // (neighbours of the same peak trivially explain the aliases just as well).
+        let second = null;
+        if (best) {
+            for (let f = 0; f <= fMax; f += ALIAS_GRID_STEP_HZ) {
+                if (Math.abs(f - best.fHz) < 10000) continue;
+                const s = score(f);
+                const cand = { fHz: f, matches: s.matches, err: s.err };
+                if (better(cand, second)) second = cand;
+            }
+        }
+        const full = best && best.matches === meas.length;
+        const margin = !second || second.matches < (best ? best.matches : 0) ||
+            second.err > Math.max(0.5, (best ? best.err : Infinity) * 3);
+        return {
+            fHz: best ? best.fHz : 0,
+            ok: !!(full && margin),
+            matches: best ? best.matches : 0,
+            err: best ? best.err : Infinity
+        };
+    }
+    // ===== AutoAliasingSolverEnd =====
+
+    // ===== UndersampleBegin =====
+    // Bandpass (undersampling) placement: pick integer-kHz Fs ≤ maxFs so the
+    // carrier lands at Fs/4 (max distance from DC and Nyquist). Zone
+    // k = floor(fc/(Fs/2)); odd zones mirror the spectrum (time reversal).
+    // Returns {fsKHz, fsHz, k, s, ifHz, zone, mirrored} or null.
+    function undersamplePlan(fcHz, maxFsKHz) {
+        if (!(fcHz > 0) || !(maxFsKHz > 0)) return null;
+        const maxFs = maxFsKHz * 1000;
+        for (let m = 1; m <= 300; m++) {
+            const fsF = (4 * fcHz) / (2 * m - 1);
+            if (fsF > maxFs) continue;
+            let fs = Math.round(fsF / 1000);
+            if (fs < 1) continue;
+            if (fs * 1000 > maxFs) fs -= 1;
+            if (fs < 1) continue;
+            const fsHz = fs * 1000;
+            const nyq = fsHz / 2;
+            const k = Math.round(fcHz / fsHz);
+            const d = fcHz - k * fsHz;
+            const ifHz = Math.abs(d);
+            if (ifHz < 0.08 * nyq || ifHz > 0.92 * nyq) continue; // keep clear of DC/Nyquist
+            const zone = Math.floor(fcHz / nyq);
+            return { fsKHz: fs, fsHz, k, s: d >= 0 ? 1 : -1, ifHz, zone, mirrored: (zone % 2) === 1 };
+        }
+        return null;
+    }
+    // ===== UndersampleEnd =====
+
+    // ===== ManualAliasBegin =====
+    // Manual aliasing: the user asserts the Nyquist zone z of a known band and
+    // drives Fs by hand. Unfold: even zone z → f = z*Fs/2 + fa;
+    // odd zone z → f = (z+1)*Fs/2 − fa (mirrored).
+    // Returns {fHz, k, s, mirrored} with carrier = k*Fs + s*fa.
+    function aliasUnfoldZone(zone, fsHz, faHz) {
+        const z = Math.max(0, Math.floor(zone));
+        if (!(fsHz > 0) || !(faHz >= 0)) return null;
+        if (z % 2 === 0) return { fHz: (z * fsHz) / 2 + faHz, k: z / 2, s: 1, mirrored: false };
+        return { fHz: ((z + 1) * fsHz) / 2 - faHz, k: (z + 1) / 2, s: -1, mirrored: true };
+    }
+    // ===== ManualAliasEnd =====
+
+    function usMaxFsKHz() {
+        return oscState.resolution === 12 ? 2800 : 3818;
+    }
+
+    // ====================== Single-channel acquisition modes ======================
+    // ETS, Auto HF и все виды Aliasing/Undersampling снимают ровно один канал:
+    // сканы Fs и локи имеют смысл только для одной площадки захвата.
+    function isSingleChAcq(mode) {
+        return mode === 'ets' || mode === 'autohf' || mode === 'alias' || mode === 'malias' || mode === 'usample';
+    }
+
+    // Канал, который остаётся активным при блокировке: текущий трек, если он
+    // отмечен; иначе первая отмеченная площадка.
+    function lockedChannelFrom(candidates) {
+        let ch = oscState.channel;
+        if (!(ch >= 0 && ch <= 3) || !candidates.includes(ch)) {
+            ch = (candidates && candidates.length) ? candidates[0] : 0;
+        }
+        return Math.max(0, Math.min(3, ch | 0));
+    }
+
+    function lockedAcqChannel() {
+        const checked = [];
+        for (let i = 0; i < 4; i++) {
+            const el = document.getElementById('cfgOscCh' + i);
+            if (el && el.checked) checked.push(i);
+        }
+        if (!checked.length) {
+            const act = oscState.activeChannels;
+            if (act && act.length) checked.push(act[0]);
+        }
+        if (!checked.length) checked.push(0);
+        return lockedChannelFrom(checked);
+    }
+
+    // Disable/grey out the locked-off channel pills + inline hint.
+    function applyChannelBoxLock() {
+        const single = isSingleChAcq(oscState.acqMode || 'realtime');
+        for (let i = 0; i < 4; i++) {
+            const el = document.getElementById('cfgOscCh' + i);
+            if (!el) continue;
+            if (single) {
+                el.disabled = (i !== oscState.channel);
+                if (el.disabled) el.title = 'Хватает CH' + (oscState.channel + 1) + ': ETS/Aliasing/Undersampling снимают один канал';
+                else el.removeAttribute('title');
+            } else {
+                el.disabled = false;
+                el.removeAttribute('title');
+            }
+        }
+        const hint = document.getElementById('oscSingleChHint');
+        if (hint) hint.style.display = single ? '' : 'none';
+    }
+
+    // Full policy: remember the multi selection once (recovered on switching to Real-time),
+    // squeeze the state to one channel and lock the pills.
+    function applySingleChannelLock() {
+        if (!isSingleChAcq(oscState.acqMode || 'realtime')) {
+            applyChannelBoxLock();
+            return false;
+        }
+        if (!oscState.usSavedCh) oscState.usSavedCh = usSaveChannelState();
+        usForceSingle(lockedAcqChannel());
+        applyChannelBoxLock();
+        return true;
+    }
+
+    function usSaveChannelState() {
+        return {
+            multi: oscState.multiChannel, act: [...oscState.activeChannels], ch: oscState.channel,
+            boxes: [0, 1, 2, 3].map(i => {
+                const el = document.getElementById('cfgOscCh' + i);
+                return el ? !!el.checked : (i === 0);
+            })
+        };
+    }
+
+    // Undersampling needs a known per-channel Fs: force single-channel display.
+    function usForceSingle(ch) {
+        for (let i = 0; i < 4; i++) {
+            const el = document.getElementById('cfgOscCh' + i);
+            if (el) el.checked = (i === ch);
+        }
+        oscState.activeChannels = [ch];
+        oscState.channel = ch;
+        oscState.multiChannel = false;
+        oscState.currentMultiIdx = 0;
+        if (oscState.multiFrames) for (let i = 0; i < 4; i++) if (i !== ch) oscState.multiFrames[i] = null;
+        oscState.framesCollectedInSession = 0;
+        const w = document.getElementById('oscDesyncWarning');
+        if (w) w.style.display = 'none';
+    }
+
+    function usRestoreChannels() {
+        const saved = oscState.usSavedCh;
+        oscState.usSavedCh = null;
+        if (!saved) return;
+        for (let i = 0; i < 4; i++) {
+            const el = document.getElementById('cfgOscCh' + i);
+            if (el) el.checked = !!saved.boxes[i];
+        }
+        oscState.activeChannels = [...saved.act];
+        oscState.multiChannel = saved.multi;
+        oscState.channel = saved.ch;
+        oscState.currentMultiIdx = 0;
+        oscState.framesCollectedInSession = 0;
+    }
+
+    function usClearState() {
+        oscState.aliasMode = false;
+        oscState.aliasFreqHz = 0;
+        oscState.aliasAmbiguous = false;
+        oscState.aliasScanning = false;
+        oscState.aliasScanIdx = 0;
+        oscState.aliasScanTot = 0;
+        oscState.aliasPts = 0;
+        oscState.usMode = null;
+        oscState.usLocked = false;
+        oscState.usScanning = false;
+        oscState.usFcHz = 0;
+        oscState.usFcEstHz = 0;
+        oscState.usAmbiguous = false;
+        oscState.usFsKHz = 0; oscState.usFsHz = 0;
+        oscState.usK = 0; oscState.usS = 1;
+        oscState.usZone = 0; oscState.usMirrored = false;
+        oscState.usTargetIFHz = 0;
+        oscState.usLastRecenter = 0;
+    }
+
+    function usSyncFcVisibility() {
+        const sel = document.getElementById('cfgOscMode');
+        const mode = sel ? sel.value : '';
+        const f = document.getElementById('cfgUndersampleFcField');
+        if (f) f.style.display = (mode === 'usample') ? '' : 'none';
+        const zf = document.getElementById('cfgAliasZoneField');
+        if (zf) zf.style.display = (mode === 'malias') ? '' : 'none';
+    }
+
+    function usReadZone() {
+        const el = document.getElementById('cfgAliasZone');
+        const z = el ? parseInt(el.value) : NaN;
+        if (isNaN(z) || z < 0) return 0;
+        if (z > 128) return 128;
+        return Math.floor(z);
+    }
+
+    // (Re)lock the manual-alias branch from the zone input + current rate.
+    // Returns false when not running (nothing to do).
+    function usRelockManual() {
+        if (!oscState.running) return false;
+        const zone = usReadZone();
+        const fsKHz = oscState.sampleRateKHz;
+        if (!(fsKHz >= 1)) return false;
+        const fsHz = fsKHz * 1000;
+        const un = aliasUnfoldZone(zone, fsHz, 0);
+        if (!un) return false;
+        oscState.usLocked = true;
+        oscState.usAmbiguous = false;
+        oscState.usFsKHz = fsKHz;
+        oscState.usFsHz = fsHz;
+        oscState.usK = un.k;
+        oscState.usS = un.s;
+        oscState.usZone = zone;
+        oscState.usMirrored = un.mirrored;
+        oscState.usTargetIFHz = fsHz / 4;
+        oscState.usFcEstHz = un.fHz;
+        oscState.usLastRecenter = performance.now();
+        return true;
+    }
+
+    // Manual Aliasing: user drives Fs (rate select) and asserts the zone.
+    // No scan — lock immediately and stream.
+    function runManualAliasFlow() {
+        usRestoreChannels();
+        usClearState();
+        oscState.usMode = 'aliasman';
+        const ch = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
+        oscState.usSavedCh = usSaveChannelState();
+        usForceSingle(ch);
+        // No trigger forcing needed: there is no scan, the lock only replays Fs.
+        usRelockManual();
+        oscState.usFcHz = oscState.usFcEstHz;
+        if (!oscState.running) return;
+        restartOsc();
+    }
+
+    // Odd-zone folding mirrors the spectrum: show the time-reversed copy so the
+    // shape matches the true IF waveform (matters for non-sine periodic signals).
+    function usViewSamples(fr) {
+        if (!oscState.usMode || !oscState.usLocked || !oscState.usMirrored || !fr || fr.length < 2) return fr;
+        const out = new Float64Array(fr.length);
+        for (let i = 0; i < fr.length; i++) out[i] = fr[fr.length - 1 - i];
+        return out;
+    }
+
+    // Multi-rate alias capture. Requires: running, single-channel, 12-bit, auto
+    // trigger already configured by the caller. Returns [{fsHz, faHz}].
+    // Capture conditions are forced here (not caller duties): oversample 0 and a
+    // small window so every point is a RAW frame; the first frame after each
+    // restart is discarded (its pre-trigger part may still hold old-rate samples
+    // from the DMA ring). User's oversample/time/div are restored afterwards.
+    async function aliasScanCapture() {
+        const meas = [];
+        const savedOver = oscState.oversample;
+        const savedTpd = oscState.timePerDiv;
+        oscState.oversample = 0; // averaging low-passes out the high-fa aliases
+        oscState.aliasScanTot = ALIAS_SCAN_RATES_KHZ.length;
+        try {
+            for (let i = 0; i < ALIAS_SCAN_RATES_KHZ.length; i++) {
+                const r = ALIAS_SCAN_RATES_KHZ[i];
+                if (!oscState.running) break;
+                oscState.aliasScanIdx = i + 1;
+                oscState.timePerDiv = ALIAS_SCAN_REQ_SAMPLES / (GRID_DIVISIONS_X * r * 1000); // req = 700
+                oscState.sampleRateKHz = r;
+                restartOsc();
+                await aliasWaitFrame(3000); // discard frame 1
+                const got = await aliasWaitFrame(3000);
+                const fr = got ? oscState.currentFrame : null;
+                if (!fr || fr.length < 10) continue;
+                const m = computeMeasurements(fr, r * 1000);
+                if (!m || m.decimated || m.vPP < 0.05 || m.freq <= 0) continue;
+                meas.push({ fsHz: r * 1000, faHz: m.freq });
+            }
+        } finally {
+            oscState.oversample = savedOver;
+            oscState.timePerDiv = savedTpd;
+            oscState.aliasScanIdx = 0;
+            oscState.aliasScanTot = 0;
+        }
+        return meas;
+    }
+
+    function usEnterNoLock() {
+        if (!oscState.running) return;
+        oscState.usLocked = false;
+        oscState.usFcEstHz = 0;
+        oscState.sampleRateKHz = 1000;
+        restartOsc();
+    }
+
+    function usApplyLock(fcHz, ambiguous) {
+        const plan = undersamplePlan(fcHz, usMaxFsKHz());
+        if (!plan || !oscState.running) return false;
+        oscState.usLocked = true;
+        oscState.usFcHz = fcHz;
+        oscState.usFcEstHz = fcHz;
+        oscState.usAmbiguous = !!ambiguous;
+        oscState.usFsKHz = plan.fsKHz;
+        oscState.usFsHz = plan.fsHz;
+        oscState.usK = plan.k;
+        oscState.usS = plan.s;
+        oscState.usZone = plan.zone;
+        oscState.usMirrored = plan.mirrored;
+        oscState.usTargetIFHz = plan.ifHz;
+        oscState.usLastRecenter = performance.now();
+        oscState.sampleRateKHz = plan.fsKHz;
+        restartOsc();
+        return true;
+    }
+
+    // Standalone Undersample (manualFcMHz>0) or Auto HF (manualFcMHz=null → alias scan first).
+    async function runUndersampleFlow(manualFcMHz) {
+        usRestoreChannels();
+        usClearState();
+        oscState.usMode = manualFcMHz ? 'manual' : 'auto';
+        oscState.usScanning = true;
+        const ch = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
+        oscState.usSavedCh = usSaveChannelState();
+        oscState.usSavedTrig = oscState.triggerMode;
+        oscState.usSavedRes = oscState.resolution;
+        oscState.usSavedAdc = oscState.adcRes;
+        usForceSingle(ch);
+        oscState.triggerMode = 'auto';
+        try {
+            let fcHz = manualFcMHz ? manualFcMHz * 1000000 : 0;
+            let ambiguous = false;
+            if (!fcHz) {
+                // Auto: find the carrier with the alias scan (forced 12-bit)
+                oscState.resolution = 12;
+                oscState.adcRes = 4095;
+                const meas = await aliasScanCapture();
+                oscState.resolution = oscState.usSavedRes;
+                oscState.adcRes = oscState.usSavedAdc;
+                if (!oscState.running) return;
+                if (meas.length >= 2) {
+                    const sol = aliasSolveEstimate(meas, ALIAS_FMAX_HZ);
+                    fcHz = sol.fHz || 0;
+                    ambiguous = !sol.ok;
+                }
+                if (!fcHz) { usEnterNoLock(); return; }
+            }
+            oscState.triggerMode = oscState.usSavedTrig;
+            if (!oscState.running) return;
+            if (!usApplyLock(fcHz, ambiguous)) usEnterNoLock();
+        } finally {
+            oscState.triggerMode = oscState.usSavedTrig;
+            if (oscState.usSavedRes !== null && !oscState.usLocked) {
+                oscState.resolution = oscState.usSavedRes;
+                oscState.adcRes = oscState.usSavedAdc;
+            }
+            oscState.usScanning = false;
+        }
+    }
+
+    async function aliasWaitFrame(timeoutMs) {
+        const s0 = oscState.frameSeq || 0;
+        const t0 = performance.now();
+        while ((oscState.frameSeq || 0) === s0 && performance.now() - t0 < timeoutMs) {
+            await sleepMs(25);
+            if (!oscState.running || (!oscState.aliasScanning && !oscState.usScanning)) return false;
+        }
+        return (oscState.frameSeq || 0) !== s0;
+    }
+
+    // Multi-rate scan on the current channel (forced single-channel 12-bit),
+    // then a continuous 1 MHz display stream showing the heterodyned waveform
+    // with the solved carrier in the overlay / Freq field.
+    async function runAliasFlow() {
+        usRestoreChannels();
+        usClearState();
+        oscState.aliasScanning = true;
+        const ch = oscState.multiChannel ? oscState.activeChannels[0] : oscState.channel;
+        const saved = {
+            multi: oscState.multiChannel, act: [...oscState.activeChannels], ch: oscState.channel,
+            rate: oscState.sampleRateKHz, res: oscState.resolution, adc: oscState.adcRes,
+            trig: oscState.triggerMode
+        };
+        const meas = [];
+        try {
+            oscState.multiChannel = false;
+            oscState.channel = ch;
+            oscState.activeChannels = [ch];
+            oscState.resolution = 12;
+            oscState.adcRes = 4095;
+            oscState.triggerMode = 'auto';
+            const got = await aliasScanCapture();
+            for (const m of got) meas.push(m);
+        } finally {
+            // Mode owns single-ness: never resurrect the multi selection inside it
+            oscState.multiChannel = false;
+            oscState.activeChannels = [ch];
+            oscState.channel = ch;
+            oscState.resolution = saved.res;
+            oscState.adcRes = saved.adc;
+            oscState.triggerMode = saved.trig;
+        }
+        oscState.aliasScanning = false;
+        applyChannelBoxLock();
+        if (!oscState.running) return;
+        oscState.aliasMode = true;
+        oscState.aliasPts = meas.length;
+        if (meas.length < 2) {
+            oscState.aliasFreqHz = 0; // no usable signal at any scan rate
+            oscState.aliasAmbiguous = true;
+        } else {
+            const sol = aliasSolveEstimate(meas, ALIAS_FMAX_HZ);
+            oscState.aliasFreqHz = sol.fHz || 0;
+            oscState.aliasAmbiguous = !sol.ok;
+        }
+        // Display stream: 1 MHz realtime with the user's (restored) channel config
+        oscState.sampleRateKHz = 1000;
+        restartOsc();
+    }
+
     // ======================== Measurements UI ========================
     let smoothFreq = 0;
     let smoothDuty = 0;
 
     function updateMeasurementsUI(m) {
         if (!m) return;
+
+        // Auto Aliasing: show the solved carrier instead of the IF (alias) frequency
+        if (oscState.aliasMode && oscState.aliasFreqHz > 0) {
+            m = Object.assign({}, m, { freq: oscState.aliasFreqHz, duty: 0 });
+        }
+
+        // Undersampling: unfold the measured IF back to the carrier.
+        // carrier ≈ usK*usFs + usS*IF (branch stored at lock time).
+        // Duty is preserved under folding, so it is shown as measured.
+        // Min/Max-decimated frames measure the IF from the midpoint envelope —
+        // unreliable there: keep the last trusted carrier and skip recentering.
+        if (oscState.usMode && oscState.usLocked) {
+            if (m.freq > 0 && !m.decimated) {
+                const ifMeas = m.freq;
+                const fsHz = oscState.usFsHz;
+                const carrier = oscState.usK * fsHz + oscState.usS * ifMeas;
+                oscState.usFcEstHz = carrier;
+                m = Object.assign({}, m, { freq: carrier });
+                // Drift tracking: if the IF hugs DC or Nyquist, recenter Fs (throttled).
+                // Manual aliasing excluded: the user owns Fs there, readout just follows.
+                const nyq = fsHz / 2, edge = 0.05 * nyq;
+                const now = performance.now();
+                if (oscState.usMode !== 'aliasman' && (ifMeas < edge || ifMeas > nyq - edge) && now - (oscState.usLastRecenter || 0) > 3000 &&
+                    oscState.running && !oscState.usScanning && !oscState.aliasScanning) {
+                    oscState.usLastRecenter = now;
+                    const plan = undersamplePlan(carrier, usMaxFsKHz());
+                    if (plan && plan.fsKHz !== oscState.sampleRateKHz) {
+                        oscState.usFsKHz = plan.fsKHz;
+                        oscState.usFsHz = plan.fsHz;
+                        oscState.usK = plan.k;
+                        oscState.usS = plan.s;
+                        oscState.usZone = plan.zone;
+                        oscState.usMirrored = plan.mirrored;
+                        oscState.usTargetIFHz = plan.ifHz;
+                        oscState.sampleRateKHz = plan.fsKHz;
+                        restartOsc();
+                    }
+                }
+            } else if (m.decimated) {
+                m = Object.assign({}, m, { freq: oscState.usFcEstHz || 0 });
+            }
+        }
 
         // Reset smoothing if frequency jumps significantly or drops to 0
         if (m.freq === 0 || smoothFreq === 0 || Math.abs(m.freq - smoothFreq) > smoothFreq * 0.5) {
@@ -1213,8 +1819,11 @@
         // --- Start / Stop ---
         const btnOscStartStop = document.getElementById('btnOscStartStop');
         if (btnOscStartStop) {
-            btnOscStartStop.addEventListener('click', () => {
-                if (!microTester.device) return alert("Connect USB first!");
+            btnOscStartStop.addEventListener('click', async () => {
+                if (!microTester.device) {
+                    const ok = await microTester.connect();
+                    if (!ok || !microTester.device) return alert("Connect USB first!");
+                }
                 if (window.Calibration && window.Calibration._calibrationBusy) return alert("Calibration is currently in progress. Please wait until finished.");
 
                 if (oscState.running) {
@@ -1224,13 +1833,6 @@
                 }
             });
         }
-
-        // Enable button if connected
-        setInterval(() => {
-            if (btnOscStartStop) {
-                btnOscStartStop.disabled = !microTester.device;
-            }
-        }, 1000);
 
         // --- Time/Div ---
         const btnTimeDivDown = document.getElementById('btnTimeDivDown');
@@ -1326,7 +1928,7 @@
 
         // --- Channel ---
         const updateChannels = () => {
-            const chs = [];
+            let chs = [];
             for (let i = 0; i < 4; i++) {
                 if (document.getElementById('cfgOscCh' + i)?.checked) {
                     chs.push(i);
@@ -1341,6 +1943,16 @@
             const wasMulti = oscState.multiChannel;
             oscState.multiChannel = chs.length > 1;
             oscState.currentMultiIdx = 0;
+            if (oscState.multiChannel && isSingleChAcq(oscState.acqMode)) {
+                // ETS/Aliasing/Undersampling own single-channel capture: squeeze back
+                // to one platform instead of dropping the mode
+                usForceSingle(lockedChannelFrom(chs));
+                oscState.activeChannels = [oscState.channel];
+                oscState.multiChannel = false;
+                oscState.currentMultiIdx = 0;
+                chs = [oscState.channel];
+                applyChannelBoxLock();
+            }
             if (!oscState.multiChannel) {
                 oscState.channel = chs[0];
             }
@@ -1401,7 +2013,7 @@
 
         function updateSampleRateOptions() {
             if (!cfgOscSampleRate) return;
-            const currentVal = parseInt(cfgOscSampleRate.value) || 1000;
+            const mode = oscState.acqMode || 'realtime';
             const is12bit = oscState.resolution === 12;
             const isMulti = oscState.multiChannel;
 
@@ -1409,7 +2021,12 @@
             for (let i = 0; i < options.length; i++) {
                 const rateVal = parseInt(options[i].value);
                 let hide = false;
-                if (is12bit && rateVal > 2800) hide = true;          // 12-bit: cap at 2.8 MHz
+                if (mode === 'ets') {
+                    hide = rateVal < 5000;   // ETS mode: only 5/10/20 MHz steps
+                } else {
+                    hide = rateVal >= 5000;  // other modes: no ETS steps
+                }
+                if (is12bit && rateVal > 2800 && rateVal < 5000) hide = true; // 12-bit realtime ceiling
                 if (isMulti && rateVal >= 5000) hide = true;         // ETS not available in multi-channel (hardware scan is used)
                 if (hide) {
                     options[i].style.display = 'none';
@@ -1419,25 +2036,47 @@
                     options[i].disabled = false;
                 }
             }
+            const isHidden = (v) => {
+                for (let i = 0; i < options.length; i++) {
+                    if (parseInt(options[i].value) === v) return options[i].disabled;
+                }
+                return true;
+            };
 
-            let cappedVal = currentVal;
-            if (is12bit && cappedVal > 2800) cappedVal = 2800;
-            if (isMulti && cappedVal >= 5000) cappedVal = 2000;
+            let cappedVal = parseInt(cfgOscSampleRate.value);
+            if (isNaN(cappedVal) || isHidden(cappedVal)) cappedVal = (mode === 'ets') ? 5000 : 100;
+            if (mode !== 'ets') {
+                if (is12bit && cappedVal > 2800) cappedVal = 2800;
+                if (cappedVal >= 5000) cappedVal = 100;
+            }
             cfgOscSampleRate.value = String(cappedVal);
             oscState.sampleRateKHz = cappedVal;
+            // Scan/lock modes manage Fs internally: rate select is display-only there.
+            // Manual aliasing is the exception: the user drives Fs by hand.
+            cfgOscSampleRate.disabled = (mode !== 'realtime' && mode !== 'ets' && mode !== 'malias');
         }
 
         if (cfgOscSampleRate) {
             cfgOscSampleRate.addEventListener('change', () => {
-                oscState.sampleRateKHz = parseInt(cfgOscSampleRate.value) || 1000;
+                oscState.sampleRateKHz = parseInt(cfgOscSampleRate.value) || 100;
+                if (oscState.acqMode === 'malias' && oscState.usMode === 'aliasman') {
+                    usRelockManual(); // user drives Fs: re-derive the fold branch, no rescan
+                }
                 if (oscState.running) restartOsc();
             });
+            usSyncFcVisibility();
         }
 
         if (cfgOscResolution) {
             cfgOscResolution.addEventListener('change', () => {
                 oscState.resolution = parseInt(cfgOscResolution.value) || 8;
                 oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
+                if (oscState.acqMode === 'ets' && oscState.resolution !== 8) {
+                    // ETS is 8-bit only in firmware: fall back to Real-time
+                    oscState.acqMode = 'realtime';
+                    const modeSel = document.getElementById('cfgOscMode');
+                    if (modeSel) modeSel.value = 'realtime';
+                }
                 updateSampleRateOptions();
                 if (oscState.running) restartOsc();
             });
@@ -1445,6 +2084,45 @@
             oscState.resolution = parseInt(cfgOscResolution.value) || 8;
             oscState.adcRes = oscState.resolution === 12 ? 4095 : 255;
             updateSampleRateOptions();
+        }
+
+        // --- Acquisition Mode: Real-time | ETS | Auto HF | Aliasing | Undersample ---
+        const cfgOscMode = document.getElementById('cfgOscMode');
+        function applyOscMode() {
+            const mode = cfgOscMode ? cfgOscMode.value : 'realtime';
+            usRestoreChannels();
+            usClearState();
+            oscState.acqMode = mode;
+            if (mode === 'ets' && oscState.resolution !== 8) {
+                // ETS is 8-bit only in firmware: switch resolution with the mode
+                oscState.resolution = 8;
+                oscState.adcRes = 255;
+                const resSel = document.getElementById('cfgOscResolution');
+                if (resSel) resSel.value = '8';
+            }
+            // ETS/Aliasing/Undersampling are single-channel: lock pills after restore
+            applySingleChannelLock();
+            updateSampleRateOptions();
+            usSyncFcVisibility();
+            if (oscState.running) startOsc();
+        }
+        if (cfgOscMode) {
+            cfgOscMode.addEventListener('change', applyOscMode);
+            oscState.acqMode = cfgOscMode.value || 'realtime';
+            usSyncFcVisibility();
+            applySingleChannelLock(); // boot: honour the pre-selected mode
+        }
+
+        // --- Manual aliasing zone input: clamp + re-derive lock live ---
+        const cfgAliasZone = document.getElementById('cfgAliasZone');
+        if (cfgAliasZone) {
+            cfgAliasZone.addEventListener('change', () => {
+                cfgAliasZone.value = String(usReadZone());
+                if (oscState.acqMode === 'malias' && oscState.usMode === 'aliasman') {
+                    usRelockManual();
+                    if (oscState.running) restartOsc();
+                }
+            });
         }
 
         // --- Oversampling ---
@@ -1689,9 +2367,43 @@
             btnOscStartStop.classList.add('btn-danger');
         }
 
+        // Scan/lock acquisition modes with internal rate management.
+        // Real-time and ETS go through the normal payload path below.
+        const _mode = oscState.acqMode || 'realtime';
+        if (_mode === 'alias' || _mode === 'usample' || _mode === 'autohf' || _mode === 'malias') {
+            if (_mode === 'usample') {
+                const _fcEl = document.getElementById('cfgUndersampleFc');
+                const _fcMHz = _fcEl ? parseFloat(_fcEl.value) : NaN;
+                if (!(_fcMHz >= 0.05 && _fcMHz <= 40)) {
+                    stopOsc();
+                    alert('Enter Undersample carrier in MHz (0.05…40)');
+                    return;
+                }
+            }
+            if (window.syncSignalGeneratorRamPreset) {
+                window.syncSignalGeneratorRamPreset();
+            }
+            if (oscState.animFrameId) cancelAnimationFrame(oscState.animFrameId);
+            oscState.animFrameId = requestAnimationFrame(renderFrame);
+            updateOscIndicator();
+            usSyncFcVisibility();
+            if (_mode === 'alias') runAliasFlow();
+            else if (_mode === 'usample') {
+                const _fcEl = document.getElementById('cfgUndersampleFc');
+                runUndersampleFlow(parseFloat(_fcEl.value));
+            }
+            else if (_mode === 'malias') runManualAliasFlow();
+            else runUndersampleFlow(null);
+            return;
+        }
+
         // Send command: [pinMask, oversample, rateKHz_lo, rateKHz_hi, trigEdge, trigLevel_lo, trigLevel_hi, trigMode, reqSamples_lo, reqSamples_hi, enableBias, bitness12, sessionId, trigCh]
         // pinMask: bitmask of active channels (bit i = CH i). Trigger happens on `trigCh`.
         // reqSamples is per-channel when pinMask has >1 bit; total = reqSamples * popcount(pinMask).
+        // Hard guarantee: ETS/Aliasing/Undersampling always capture one channel.
+        if (isSingleChAcq(_mode) && (oscState.multiChannel || oscState.activeChannels.length > 1)) {
+            applySingleChannelLock();
+        }
         if (oscState.multiChannel) {
             oscState.currentMultiIdx = 0;
             oscState.multiFrames = [null, null, null, null];
@@ -1731,7 +2443,7 @@
         const modeMap = { 'auto': 0, 'normal': 1, 'single': 2 };
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
-        const isEtsReq = reqRate >= 5000 && !oscState.multiChannel;
+        const isEtsReq = isEtsMode();
         const maxHwRate = oscState.resolution === 12 ? 2800 : 3818;
         const effectiveRateKHz = isEtsReq ? Math.min(reqRate, 6000) : Math.min(reqRate, maxHwRate);
         const numCh = oscState.multiChannel ? oscState.activeChannels.length : 1;
@@ -1772,6 +2484,8 @@
         const btnOscStartStop = document.getElementById('btnOscStartStop');
 
         oscState.running = false;
+        usRestoreChannels();
+        usClearState();
         microTester.sendCommand(CMD_OSC_STOP);
         if (window.syncSignalGeneratorRamPreset) {
             window.syncSignalGeneratorRamPreset();
@@ -1790,6 +2504,11 @@
         updateOscIndicator();
     }
     window.stopOsc = stopOsc;
+
+    // USB unplug: stop the capture and clear the green indicator dot
+    if (typeof microTester !== 'undefined' && microTester.addDisconnectListener) {
+        microTester.addDisconnectListener(() => { if (oscState.running) stopOsc(); });
+    }
 
     function updateOscIndicator() {
         const oscIndicator = document.getElementById('oscIndicator');
@@ -1838,7 +2557,7 @@
         const modeMap = { 'auto': 0, 'normal': 1, 'single': 2 };
         payload[7] = modeMap[oscState.triggerMode] || 0;
 
-        const isEtsReq = reqRate >= 5000 && !oscState.multiChannel;
+        const isEtsReq = isEtsMode();
         const maxHwRate = oscState.resolution === 12 ? 2800 : 3818;
         const effectiveRateKHz = isEtsReq ? Math.min(reqRate, 6000) : Math.min(reqRate, maxHwRate);
         const numCh = oscState.multiChannel ? chs.length : 1;

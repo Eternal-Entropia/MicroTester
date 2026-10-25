@@ -83,10 +83,17 @@ static uint32_t fr_goertzel_calc(const uint16_t* buf, uint32_t n, float omega, u
     if (power < 0.0f) power = 0.0f;
 
     if (out_phase_rad != NULL) {
-        // Window-relative phase angle:
+        // Window-relative phase angle. For x(t) = A*sin(omega*t + phi) the
+        // Goertzel pair evaluates to: win_phase = phi(win_start) + omega*N_window,
+        // i.e. the vector carries one extra rotation for the WHOLE window length.
         float win_phase = atan2f(im, re);
-        // Analytically rotate vector back to t=0 to compensate for settle_samples offset:
-        float t0_phase = win_phase - ((float)sample_offset * omega);
+        // Rotate back to t=0 of the capture: undo the settle offset AND the
+        // in-window rotation. For exactly whole-period windows omega*N_window
+        // vanishes mod 2*pi, but perCycle is the ROUNDED Fs/f (timer ARR
+        // quantization), so windows are usually a fraction of a period off and
+        // the missing term used to leave a systematic phase bias of up to
+        // tens of degrees at the high end of the sweep.
+        float t0_phase = win_phase - ((float)(sample_offset + n) * omega);
         while (t0_phase > FR_PI) t0_phase -= 2.0f * FR_PI;
         while (t0_phase < -FR_PI) t0_phase += 2.0f * FR_PI;
         *out_phase_rad = t0_phase;

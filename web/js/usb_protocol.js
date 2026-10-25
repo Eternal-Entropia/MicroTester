@@ -21,6 +21,13 @@ const CMD_COMP_STOP  = 0x51;
 const CMD_FR_START   = 0x60;
 const CMD_FR_STEP    = 0x61;
 const CMD_FR_STOP    = 0x62;
+const CMD_SDR_START  = 0x70; // [fsKHz_lo][fsKHz_hi][wfFps][pinIdx][adcBits]
+const CMD_SDR_STOP   = 0x71;
+const CMD_SDR_TUNE   = 0x72; // [freqListen_b0..3][if0Hz_lo][if0Hz_hi]
+
+const CMD_MOD_START  = 0x80; // Modulator: live AM/FM/SSB/Class-D
+const CMD_MOD_STOP   = 0x81;
+const CMD_MOD_CONFIG = 0x82; // 32-byte ModConfig (see web/js/modulator.js)
 
 const PKT_VOLTMETER_DATA     = 0x10;
 const PKT_OSCILLOSCOPE_DATA  = 0x12;
@@ -30,6 +37,8 @@ const PKT_LOGIC_DATA         = 0x40;
 const PKT_COMP_RESULT        = 0x50;
 const PKT_COMP_ESR_TABLE     = 0x51;
 const PKT_FR_DATA            = 0x60;
+const PKT_SDR_WF             = 0x70; // [seq][meta][512 log-mag bins], meta bit0 = zone parity
+const PKT_SDR_AUDIO          = 0x71; // [seq][meta][int8 samples @ fs/32]
 
 class MicroTesterUSB {
     constructor() {
@@ -43,6 +52,9 @@ class MicroTesterUSB {
         
         // Multi-listener data routing
         this._dataListeners = [];
+        // Modules register here so a real USB unplug can stop their running
+        // modes and clear the green "active" indicator dots.
+        this._disconnectListeners = [];
 
         // Legacy single callback support (voltmeter.js sets this)
         this.onData = null;
@@ -66,6 +78,31 @@ class MicroTesterUSB {
     /** Remove a previously registered data listener. */
     removeDataListener(callback) {
         this._dataListeners = this._dataListeners.filter(cb => cb !== callback);
+    }
+
+    /**
+     * Register a callback fired when the connected device is unplugged
+     * (navigator.usb 'disconnect' event). Unlike the legacy onDisconnect
+     * property, listeners are not overwritten by other handlers.
+     * Returns the callback for removal via removeDisconnectListener().
+     */
+    addDisconnectListener(callback) {
+        this._disconnectListeners.push(callback);
+        return callback;
+    }
+
+    removeDisconnectListener(callback) {
+        this._disconnectListeners = this._disconnectListeners.filter(cb => cb !== callback);
+    }
+
+    /** Internal: notify all disconnect listeners (USB unplug). */
+    _dispatchDisconnect() {
+        if (this.onDisconnect) {
+            try { this.onDisconnect(); } catch (e) { console.error('[USB] onDisconnect handler failed', e); }
+        }
+        for (const cb of this._disconnectListeners) {
+            try { cb(); } catch (e) { console.error('[USB] disconnect handler failed', e); }
+        }
     }
 
     /** Internal: dispatch data to all listeners */
@@ -160,7 +197,7 @@ class MicroTesterUSB {
             this.device = null;
             this.interfaceNumber = -1;
             console.log("MicroTester disconnected.");
-            if (this.onDisconnect) this.onDisconnect();
+            this._dispatchDisconnect();
         }
     }
 

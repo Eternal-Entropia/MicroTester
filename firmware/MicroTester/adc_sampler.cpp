@@ -200,7 +200,22 @@ void adc_sampler_start(AdcConfig config) {
     TIM2->CR1 = 0;
     
     uint32_t timerClock = 84000000;
-    uint32_t rateHz = currentConfig.isOscilloscope ? (currentConfig.rateKHz * 1000) : 10000;
+    uint32_t rateHz;
+    if (currentConfig.isOscilloscope) {
+        rateHz = currentConfig.rateKHz * 1000;
+    } else {
+        // Voltmeter: host-configurable rate, default 10 kHz (backward compatible).
+        // Up to 2.4 MHz (12-bit HW limit 2.8 MHz). Above ~200-400 kHz USB FS
+        // cannot stream every sample: best-effort, newest data wins, gaps possible.
+        rateHz = currentConfig.voltRateHz;
+        if (rateHz < 1000) rateHz = 10000;
+        if (rateHz > 2400000) rateHz = 2400000;
+        currentConfig.voltRateHz = rateHz;
+        // Chunk: max samples per USB packet, default 64.
+        if (currentConfig.voltChunk < 32 || currentConfig.voltChunk > 1024) {
+            currentConfig.voltChunk = 64;
+        }
+    }
     
     uint32_t maxRate = currentConfig.bitness12 ? 2800000 : 3818000; // Physical hardware limits
     if (rateHz > maxRate) rateHz = maxRate;
@@ -298,7 +313,13 @@ void adc_sampler_start(AdcConfig config) {
         } else {
             ADC1->CR1 = ADC_CR1_SCAN; // 12-bit
             ADC1->SMPR2 &= ~(7 << (3 * channel));
-            ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
+            // 15 cycles (643 ns) fits up to ~1 MHz; above that use 3 cycles (357 ns)
+            // to keep up with the TIM2 trigger, at the cost of slightly higher noise.
+            if (rateHz > 1000000) {
+                ADC1->SMPR2 |= (0 << (3 * channel)); // 3 cycles
+            } else {
+                ADC1->SMPR2 |= (1 << (3 * channel)); // 15 cycles
+            }
             ADC1->CR2 = (1 << 28) | (0x06 << 24) | ADC_CR2_DMA | ADC_CR2_DDS | ADC_CR2_ADON; // Ext trigger TIM2
         }
         TIM2->CR1 |= TIM_CR1_CEN;
@@ -723,12 +744,17 @@ int adc_sampler_get_available(uint8_t** outPtr) {
     if (available > contiguous) {
         available = contiguous;
     }
-    
-    if (available > 64) {
-        available = 64; // Max 128 bytes per chunk to prevent WebUSB TX buffer overflow
+
+    uint16_t chunk = currentConfig.voltChunk;
+    if (chunk < 32 || chunk > 1024) chunk = 64;
+    if (available > chunk) {
+        available = chunk; // Host-configurable max samples per chunk (default 64)
     }
-    
-    if (available >= 32 || (available > 0 && available == contiguous)) {
+
+    uint16_t thresh = chunk / 2;
+    if (thresh < 16) thresh = 16;
+    if (thresh > 512) thresh = 512;
+    if (available >= thresh || (available > 0 && available == contiguous)) {
         available = available & ~1; // Must be even
         if (available == 0) return 0;
         for (int i = 0; i < available; i++) {

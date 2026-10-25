@@ -440,7 +440,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const v = (m === FR_MODE_DIODE && !p.isDefault) ? Math.max(1, rawV - z) : rawV;
             if (v <= 0) continue;
             const list = refIndex[m] || (refIndex[m] = []);
-            list.push({ f: p.freq >>> 0, lf: p.freq, lv: Math.log(v), phase: (p.phase !== undefined) ? p.phase : 0.0 });
+            if (p.phase === undefined || p.phase === null || !isFinite(p.phase)) continue; // skip points without phase: interpolating them as 0 deg would bend the reference
+            list.push({ f: p.freq >>> 0, lf: p.freq, lv: Math.log(v), phase: p.phase });
         }
         for (const m in refIndex) refIndex[m].sort((a, b) => a.f - b.f);
         refDirty = false;
@@ -517,12 +518,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 db = 20 * Math.log10(dutSig / maxSig);
             }
 
-            // Phase calculation
+            // Phase calculation. Zero-signal points (below the noise floor) get
+            // NO phase value: injecting a fake 0 deg point would corrupt the
+            // unwrap chain exactly where the DUT signal dies out.
             const rawPhase = (d.phase !== undefined && isFinite(d.phase)) ? d.phase : 0.0;
             const refPhase = getRefPhaseAt(d.freq >>> 0, m);
-            let relPhase = (dutSig <= 3) ? 0.0 : (rawPhase - refPhase);
-            while (relPhase > 180.0) relPhase -= 360.0;
-            while (relPhase < -180.0) relPhase += 360.0;
+            let relPhase = null;
+            if (dutSig > 3) {
+                relPhase = rawPhase - refPhase;
+                while (relPhase > 180.0) relPhase -= 360.0;
+                while (relPhase < -180.0) relPhase += 360.0;
+            }
 
             if (isFinite(db)) {
                 results.push({
@@ -538,24 +544,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Unwrap phase across frequency points for smooth continuous curve
-        if (results.length > 1) {
-            let prev = results[0].phase;
-            let offset = 0;
-            results[0].phaseUnwrapped = prev;
-            for (let i = 1; i < results.length; i++) {
-                let cur = results[i].phase + offset;
+        // Unwrap phase across frequency points for a smooth continuous curve.
+        // Invalid points (below the noise floor) are skipped: the curve breaks
+        // there and the unwrap chain resumes from the last valid point.
+        let prev = null;
+        let offset = 0.0;
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.phase === null || !isFinite(r.phase)) { r.phaseUnwrapped = null; continue; }
+            if (prev === null) {
+                r.phaseUnwrapped = r.phase;
+            } else {
+                let cur = r.phase + offset;
                 let diff = cur - prev;
                 if (diff > 180.0) {
-                    const steps = Math.round(diff / 360.0);
-                    offset -= 360.0 * steps;
+                    offset -= 360.0 * Math.round(diff / 360.0);
                 } else if (diff < -180.0) {
-                    const steps = Math.round(-diff / 360.0);
-                    offset += 360.0 * steps;
+                    offset += 360.0 * Math.round(-diff / 360.0);
                 }
-                results[i].phaseUnwrapped = results[i].phase + offset;
-                prev = results[i].phaseUnwrapped;
+                r.phaseUnwrapped = r.phase + offset;
             }
+            prev = r.phaseUnwrapped;
         }
 
         return results;
@@ -574,8 +583,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ref: 0,
             dut: p.value >>> 0,
             db: 20 * Math.log10(Math.max(1, p.value >>> 0) / maxV),
-            phase: p.phase || 0.0,
-            phaseUnwrapped: p.phase || 0.0
+            phase: (p.phase !== undefined && p.phase !== null && isFinite(p.phase)) ? p.phase : null,
+            phaseUnwrapped: (p.phase !== undefined && p.phase !== null && isFinite(p.phase)) ? p.phase : null
         }));
     }
 
@@ -906,7 +915,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 let startedP = false;
                 for (const p of sortedData) {
                     const x = X(p.freq);
-                    const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped : (p.phase || 0.0);
+                    const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped :
+                        ((p.phase !== undefined && p.phase !== null && isFinite(p.phase)) ? p.phase : NaN);
+                    if (!isFinite(phaseVal)) { startedP = false; continue; } // gap: curve resumes at the next valid point
                     const y = Y_phase(phaseVal);
                     if (x < padL - 10 || x > padL + plotW + 10) continue;
                     if (!startedP) {
@@ -923,7 +934,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (sortedData.length <= 512) {
                     for (const p of sortedData) {
                         const x = X(p.freq);
-                        const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped : (p.phase || 0.0);
+                        const phaseVal = (p.phaseUnwrapped !== undefined && isFinite(p.phaseUnwrapped)) ? p.phaseUnwrapped :
+                            ((p.phase !== undefined && p.phase !== null && isFinite(p.phase)) ? p.phase : NaN);
+                        if (!isFinite(phaseVal)) continue;
                         const y = Y_phase(phaseVal);
                         if (x < padL || x > padL + plotW) continue;
                         ctx.fillStyle = '#fbbf24';
@@ -986,8 +999,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.stroke();
 
             let tipText;
-            const pv = (hoverPoint.phaseUnwrapped !== undefined) ? hoverPoint.phaseUnwrapped : hoverPoint.phase;
-            const pStr = (pv !== undefined) ? `${pv >= 0 ? '+' : ''}${pv.toFixed(1)}°` : '--°';
+            const pv = (hoverPoint.phaseUnwrapped !== undefined && isFinite(hoverPoint.phaseUnwrapped)) ? hoverPoint.phaseUnwrapped :
+                ((hoverPoint.phase !== undefined && hoverPoint.phase !== null && isFinite(hoverPoint.phase)) ? hoverPoint.phase : NaN);
+            const pStr = isFinite(pv) ? `${pv >= 0 ? '+' : ''}${pv.toFixed(1)}°` : '--°';
             const gStr = `${hoverPoint.db >= 0 ? '+' : ''}${hoverPoint.db.toFixed(1)} dB`;
             if (isPhaseOnly) {
                 tipText = `${fmtHz(hoverPoint.freq)} · Phase: ${pStr}`;
@@ -1949,6 +1963,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global exports
     window.renderFrCanvas = render;
     window.stopFr = stopSweep;
+
+    // USB unplug: abort the sweep state so the panel doesn't hang waiting
+    if (typeof microTester !== 'undefined' && microTester.addDisconnectListener) {
+        microTester.addDisconnectListener(() => { if (state.busy) stopSweep(); });
+    }
 
     // Debug log panel
     const logView = document.getElementById('frLogView');

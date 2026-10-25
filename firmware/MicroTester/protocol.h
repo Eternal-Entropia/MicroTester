@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 // Host to Device Commands
-#define CMD_VOLT_START    0x10
+#define CMD_VOLT_START    0x10  // Payload: [pin(1)] [oversample(1)] [bias(1, opt)] [rateHz_b0..3(4, opt, def 10000)] [chunk_lo(1, opt, def 64)] [chunk_hi(1, opt)]
 #define CMD_VOLT_STOP     0x11
 #define CMD_VOLT_SET_BIAS 0x14
 
@@ -26,6 +26,20 @@
 #define CMD_FR_STEP       0x61  // Measure one point: [freq_b0..3(4)] [mode(1)]  mode: 0=Direct, 1=Diode, 2=Sine (Σ-Δ ≤ 1 MHz)
 #define CMD_FR_STOP       0x62  // Stop FR analyzer (PWM off, pins Hi-Z)
 
+// SDR receiver (Phase 0): under-sampling capture + on-MCU DDC (see sdr_rx.h)
+#define CMD_SDR_START     0x70  // [fsKHz_lo(1)][fsKHz_hi(1)][wfFps(1)][pinIdx(1)][adcBits(1)]
+#define CMD_SDR_STOP      0x71
+#define CMD_SDR_TUNE      0x72  // [freqListen_b0..3(4)][if0Hz_lo(1)][if0Hz_hi(1, optional)]
+
+// Modulator: live AM / FM / SSB / Class-D generator (see modulator.h)
+#define CMD_MOD_START     0x80
+#define CMD_MOD_STOP      0x81
+#define CMD_MOD_CONFIG    0x82  // Payload (32 bytes): [mode(1)][sideband(1)][source(1)][outPin(1)][adcPin(1)]
+                                // [prescalerExp(1)][normalizeOn(1)][biasOn(1)]
+                                // [carrierInc_b0..3(4)][modInc_b0..3(4)][depthQ15_lo(2)]
+                                // [devInc_b0..3(4)][ssbLevelQ15(2)][gainQ8_lo(2)][offsetQ7(1)]
+                                // [normTargetPct(1)][classDCarrierHz_b0..3(4)]
+
 // Device to Host Packets
 #define PKT_VOLTMETER_DATA     0x10
 #define PKT_OSCILLOSCOPE_DATA  0x12
@@ -33,6 +47,9 @@
 #define PKT_COMP_RESULT        0x50  // Component test result
 #define PKT_COMP_ESR_TABLE     0x51  // ESR table: [n(1)] + n x [freqHz(4)] [esr_x100(2)] [td_x10000(2)] [flags(2)]
 #define PKT_FR_DATA            0x60  // FR point reply: [freq_b0..3(4)] [mode(1)] [value_b0..3(4)]
+
+#define PKT_SDR_WF             0x70  // [seq(1)][meta(1)][512 log-mag bins]; bin k = k*fs/1024 Hz; meta bit0 = zone parity
+#define PKT_SDR_AUDIO          0x71  // [seq(1)][meta(1)][int8 samples at fs/32 (31.25 kS/s @ 1 MSps)]
 
 // Command structure from Host (Variable length payload)
 // [CMD (1 byte)] [PayloadLength (1 byte)] [Payload...]

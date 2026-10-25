@@ -598,12 +598,18 @@ static void analyze_data() {
         }
     }
     
-    // If capacitive decay was detected during scan, skip Resistor & Diode checks!
-    if (overall_capacitive) {
-        final_result.type = COMP_NONE; // Will be measured by measure_capacitor
-        return;
-    }
-    
+    // Capacitive-decay signatures make the PASSIVE scan-snapshot heuristics
+    // (short / open / resistor / single diode) unreliable, so they are skipped
+    // below when the flag is set. Transistors however must NOT be skipped: a
+    // transistor can produce a capacitive-like decay too (gate/junction
+    // charging, high ICEO on floating nodes), and the BJT/MOSFET checks further
+    // down are ACTIVE verifications (real hFE current gain, gate-controlled
+    // channel) that a capacitor physically cannot pass. Only when both
+    // verifications fail do we fall through to COMP_NONE and the caller
+    // measures the pair as a capacitor. This is the core transistor-vs-
+    // capacitor discriminator.
+    if (!overall_capacitive) {
+
     // Check if it's a 3-way short (calibration mode)
     uint16_t diff01 = (GET_V(0, 0, false) > GET_V(0, 1, false)) ? (GET_V(0, 0, false) - GET_V(0, 1, false)) : (GET_V(0, 1, false) - GET_V(0, 0, false));
     uint16_t diff02 = (GET_V(1, 0, false) > GET_V(1, 2, false)) ? (GET_V(1, 0, false) - GET_V(1, 2, false)) : (GET_V(1, 2, false) - GET_V(1, 0, false));
@@ -903,6 +909,7 @@ static void analyze_data() {
             return;
         }
     }
+    } // end of the !overall_capacitive pass for scan-based passive checks
 
     // ============ STEP 4: Detect DIODES and count junctions ============
     struct DiodeInfo {
@@ -953,6 +960,10 @@ static void analyze_data() {
     }
     
     // ============ STEP 5: BJT Detection ============
+    // Runs in EVERY case, even when the scan flagged capacitive decay:
+    // measure_hfe() actively biases the candidate and requires real current
+    // gain (hFE >= 10). A capacitor cannot produce an amplified collector
+    // current, so this - not the scan flag - decides transistor vs capacitor.
     if (diode_count >= 2) {
         for (int b = 0; b < 3; b++) {
             int npn_junctions = 0, pnp_junctions = 0;
@@ -1037,6 +1048,10 @@ static void analyze_data() {
     }
 
     // ============ STEP 5.5: MOSFET Detection (Enhancement Mode) ============
+    // Also runs in every case: test_mosfet_channel() proves the channel really
+    // opens by gate drive (and blocks at Vgs = 0). A capacitor - even a real
+    // one - cannot switch a channel on/off, so a falsely-capacitive scan flag
+    // can no longer hide a MOSFET behind a "capacitor" result.
     if (diode_count >= 1 && diode_count <= 2) {
         for (int dIdx = 0; dIdx < diode_count; dIdx++) {
             uint8_t pinA = diodes[dIdx].anode;
@@ -1082,7 +1097,11 @@ static void analyze_data() {
     }
     
     // ============ STEP 6: Single DIODE ============
-    if (diode_count == 1 || diode_count == 2) {
+    // Trusted only WITHOUT capacitive signatures: with the flag set, the
+    // charge-state asymmetry of a partially discharged capacitor can mimic one
+    // diode junction. Real 2-junction transistors were already claimed by
+    // STEP 5 above, real MOSFETs by STEP 5.5.
+    if (!overall_capacitive && (diode_count == 1 || diode_count == 2)) {
         final_result.type = COMP_DIODE;
         final_result.pinA = diodes[0].anode;
         final_result.pinB = diodes[0].cathode;
@@ -1458,19 +1477,39 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vlos
             // Internal holding cap (ADC + MUX) is empirically around 10.4pF based on 32pF test.
             // Constant = 10.4pF * 4095 * 10 = ~425000
             uint32_t c_pf_x10 = (425000UL / v_share) - (425000UL / v_zero);
-            
+
             // Allow reporting up to ~8000pF in this mode (covers power MOSFET Cg).
-            if (c_pf_x10 > 2 && c_pf_x10 < 80000) { 
-                final_result.type = COMP_CAPACITOR;
-                final_result.pinA = probeA;
-                final_result.pinB = probeB;
-                final_result.pinC = probeC;
-                final_result.value1 = c_pf_x10 / 10; // pF
-                final_result.value2 = 0;
-                final_result.value3 = 0;
-                final_result.flags = 0;
-                discharge_probes_completely(probeA, probeB);
-                return true;
+            if (c_pf_x10 > 2 && c_pf_x10 < 80000) {
+                // Clamp rejection (transistor vs capacitor): the forward-biased
+                // junction of a transistor or diode between these probes looks
+                // like a ~30 pF capacitor in charge sharing, but its node
+                // voltage can never rise to the rail - it stalls at Vbe/Vf.
+                // A real capacitor (even a few pF) charges almost to VCC
+                // through RL in microseconds, so requiring a near-rail
+                // settlement filters the junction fakes while keeping every
+                // real capacitor.
+                set_probe_rl_vcc(probeA);
+                delay(2); // tau <= 1360 ohm * 8 nF ~= 11 us; 2 ms = 180 tau
+                uint32_t ve_sum = 0;
+                for (int k = 0; k < 8; k++) ve_sum += analogRead(probes[probeA].adc_pin);
+                set_probe_hiz(probeA);
+                uint16_t v_settled = (uint16_t)(ve_sum / 8);
+
+                if (v_settled >= 3900) {
+                    final_result.type = COMP_CAPACITOR;
+                    final_result.pinA = probeA;
+                    final_result.pinB = probeB;
+                    final_result.pinC = probeC;
+                    final_result.value1 = c_pf_x10 / 10; // pF
+                    final_result.value2 = 0;
+                    final_result.value3 = 0;
+                    final_result.flags = 0;
+                    discharge_probes_completely(probeA, probeB);
+                    return true;
+                }
+                // Junction clamp confirmed: not a capacitor - fall through and
+                // return false for this pair (a transistor result, if any,
+                // stays untouched).
             }
         }
         
@@ -1573,7 +1612,20 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vlos
     set_probe_rl_gnd(probeA);
     set_probe_rl_gnd(probeB);
     delay(30);
-
+    // Adaptive extra discharge: the scan / analysis stages may have left a big
+    // capacitor partially charged; timing the charge curve from a pre-charged
+    // state corrupts dt (a near-zero dt even gets reported as a fake nF-scale
+    // capacitor). Hold both probes to ground until the differential voltage
+    // drops below ~0.16 V (200 counts), bounded to 1.5 s total.
+    {
+        uint32_t t_dis = millis();
+        while (millis() - t_dis < 1500) {
+            uint16_t va = analogRead(probes[probeA].adc_pin);
+            uint16_t vb = analogRead(probes[probeB].adc_pin);
+            if (((va > vb) ? (uint16_t)(va - vb) : (uint16_t)(vb - va)) < 200) break;
+            delay(5);
+        }
+    }
     set_probe_rl_gnd(probeB);
     uint32_t t_start = micros();
     set_probe_rl_vcc(probeA); // Start charging through 680 ohm RL
@@ -1605,6 +1657,18 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vlos
     if (r2_ok && t_v2 > t_v1) {
         uint32_t dt = t_v2 - t_v1;
 
+        // Guard 1 (open-pair / clamp rejection): conduction that settles within
+        // one ADC loop iteration (dt ~ 0) is an open pair or a diode-like
+        // clamp, not a capacitor - with the old code such a ~0 dt could even be
+        // reported as a fake few-nF "capacitor". Any capacitor large enough to
+        // reach Range 2 (smaller ones are measured in Range 1) has
+        // dt = tau * 0.207 >> 50 us.
+        if (dt < 50) {
+            set_probe_hiz(probeA);
+            set_probe_hiz(probeB);
+            return false;
+        }
+
         // Disconnect charging, tie probeB to GND, and settle initial resistor step
         set_probe_hiz(probeA);
         set_probe_rl_gnd(probeB);
@@ -1632,6 +1696,31 @@ static bool measure_capacitor(uint8_t probeA, uint8_t probeB, uint16_t* out_vlos
         uint32_t rl_sum = (g_RL[probeA] + g_RL[probeB]) / 10;
         if (rl_sum == 0) rl_sum = 1360;
         uint32_t c_pf = (uint32_t)((uint64_t)dt * 4901960ULL / (uint64_t)rl_sum);
+
+        // Guard 2 (clamp rejection): the dt loop above stops at only ~0.81 V.
+        // A true capacitor charges all the way to the rail; a transistor or
+        // diode junction between the probes clamps the node at Vbe / Vf /
+        // V_CE(sat) forever. Top up through RL and require reaching >= 97% of
+        // VCC. Applied only for C <= 100 uF (tau <= 136 ms => settles within
+        // ~420 ms): bigger electrolytics keep the legacy vloss-only path.
+        if (c_pf <= 100000000UL) {
+            set_probe_rl_vcc(probeA);
+            set_probe_rl_gnd(probeB);
+            uint32_t t_top = millis();
+            bool reached_rail = false;
+            while (millis() - t_top < 900) {
+                if (analogRead(probes[probeA].adc_pin) >= 3950) { reached_rail = true; break; }
+                delay(2);
+            }
+            set_probe_hiz(probeA);
+            if (!reached_rail) {
+                // Node stalled below the rail: it is a semiconductor junction,
+                // not a capacitor. Report failure so the caller tries the other
+                // polarity / probe pairs and a transistor result (if any) stands.
+                set_probe_hiz(probeB);
+                return false;
+            }
+        }
 
         final_result.type = COMP_CAPACITOR;
         final_result.pinA = probeA;
@@ -1814,7 +1903,14 @@ void comp_tester_loop() {
                 // Resistors/inductors/diodes have static current (noise < 20 counts) and never
                 // trigger capacitive decay, so a modest 150-count drop is a safe detector.
                 if (early_gnd > 300 && late_gnd < (early_gnd - 150)) {
-                    scan_results[scan_step].is_capacitive = true;
+                    // Confirm the decay is still ongoing 30 ms later: a charging
+                    // capacitor keeps sinking current (node voltage keeps
+                    // falling), while transistor junction/gate settling or ADC
+                    // S&H charge injection stabilizes. Rejecting a one-shot
+                    // drop here prevents transistors from entering the cap path.
+                    delay(30);
+                    uint16_t late2 = read_adc_avg(probes[pGND].adc_pin);
+                    scan_results[scan_step].is_capacitive = (late2 < (late_gnd - 10));
                 } else {
                     scan_results[scan_step].is_capacitive = false;
                 }
@@ -1848,11 +1944,13 @@ void comp_tester_loop() {
             break;
             
         case STATE_ANALYZE:
-            if (tester_mode == 1) {
-                final_result.type = COMP_NONE;
-            } else {
-                analyze_data();
-            }
+            // Run the full analysis in every mode. Previously pF mode
+            // (tester_mode == 1) skipped all transistor checks entirely and
+            // could literally report a transistor as a small capacitor.
+            // measure_capacitor() itself still limits to Range 0 charge
+            // sharing in that mode, and the clamp rejection there keeps
+            // forward-biased junctions from being reported as ~30 pF "caps".
+            analyze_data();
             
             // Targeted capacitor measurement. Prefer probe pairs that already showed
             // capacitive decay during the scan; fall back to all pairs if the

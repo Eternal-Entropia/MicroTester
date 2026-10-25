@@ -7,7 +7,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MicroTester - Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="img/icon.svg">
-    <link rel="manifest" href="manifest.json">
+    <script>
+        // manifest is fetched dynamically: file:// pages cannot fetch it (CORS
+        // noise in console), http(s) pages get the full PWA manifest
+        if (/^https?:$/.test(location.protocol)) {
+            const ml = document.createElement('link');
+            ml.rel = 'manifest';
+            ml.href = 'manifest.json';
+            document.head.appendChild(ml);
+        }
+    </script>
     <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -103,6 +112,22 @@
         .ch-toggle input:focus-visible~span {
             outline: 2px solid #fff;
             outline-offset: 2px;
+        }
+
+        /* Pills locked off by single-channel modes (ETS/Aliasing/Undersampling) */
+        .ch-toggle input:disabled~span {
+            opacity: 0.35;
+            border-style: dashed;
+        }
+
+        .ch-toggle input:disabled~span:hover {
+            transform: none;
+            background-color: inherit;
+        }
+
+        .ch-toggle:hover input:disabled~span {
+            transform: none;
+            background-color: rgba(0, 0, 0, 0.2);
         }
 
         /* CH1: Blue */
@@ -272,6 +297,52 @@
             background-color: rgba(59, 130, 246, 0.55);
             box-shadow: 0 0 12px rgba(59, 130, 246, 0.35), inset 0 0 8px rgba(59, 130, 246, 0.3);
         }
+
+        /* SDR panel */
+        .sdr-canvas-wrap {
+            width: 100%;
+            border-radius: var(--radius-sm, 8px);
+            overflow: hidden;
+            background: #05070f;
+            border: 1px solid rgba(56, 189, 248, 0.15);
+        }
+
+        .sdr-canvas-wrap canvas {
+            width: 100%;
+            display: block;
+            cursor: crosshair;
+        }
+
+        #sdrSpectrum {
+            height: 176px;
+        }
+
+        #sdrWf {
+            height: 320px;
+        }
+
+        .sdr-meter-track {
+            flex: 1;
+            min-width: 120px;
+            height: 10px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 5px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .sdr-meter-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #22c55e 0%, #eab308 65%, #ef4444 90%);
+            transition: width 0.2s ease;
+        }
+
+        .sdr-hint {
+            font-size: 12px;
+            color: var(--text-muted, #94a3b8);
+            line-height: 1.55;
+        }
     </style>
 </head>
 
@@ -328,6 +399,20 @@
                     <div class="bg-indicator" id="compIndicator"></div>
                 </button>
 
+                <button class="nav-item" data-panel="sdr" title="SDR Receiver (HF)">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                            <path d="M12 2a8 8 0 0 1 8 8" />
+                            <path d="M12 6a4 4 0 0 1 4 4" />
+                            <circle cx="12" cy="10" r="1" fill="currentColor" stroke="none" />
+                            <path d="M12 11v3l6 8M12 14l-6 8" />
+                        </svg>
+                    </span>
+                    <span>SDR Receiver</span>
+                    <div class="bg-indicator" id="sdrIndicator"></div>
+                </button>
+
                 <button class="nav-item" data-panel="freqresp" title="Frequency Response">
                     <span class="nav-item-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
@@ -363,6 +448,19 @@
                     </span>
                     <span>Signal Generator</span>
                     <div class="bg-indicator" id="pwmDacIndicator"></div>
+                </button>
+
+                <button class="nav-item" data-panel="modulator" title="Modulator: AM / FM / SSB / Class-D">
+                    <span class="nav-item-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="2" />
+                            <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49" />
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
+                        </svg>
+                    </span>
+                    <span>Modulator</span>
+                    <div class="bg-indicator" id="modIndicator"></div>
                 </button>
 
                 <div class="nav-divider"></div>
@@ -420,7 +518,7 @@
 
             <div class="sidebar-footer">
                 <div class="text-xs text-muted" style="text-align: center;">
-                    MicroTester Release v1.4
+                    MicroTester Release v1.5
                 </div>
             </div>
         </aside>
@@ -452,7 +550,7 @@
                     <div class="volt-toolbar card"
                         style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
                         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                            <button class="btn btn-success btn-sm" id="btnStartStop" disabled>
+                            <button class="btn btn-success btn-sm" id="btnStartStop">
                                 ▶ Start
                             </button>
                         </div>
@@ -575,6 +673,7 @@
                             <div class="config-field">
                                 <label>Oversampling</label>
                                 <select id="cfgVoltOversampling">
+                                    <option value="0">Off (no averaging, 1 sample)</option>
                                     <option value="1">+1 bit (4 samples)</option>
                                     <option value="2">+2 bits (16 samples)</option>
                                     <option value="3">+3 bits (64 samples)</option>
@@ -585,8 +684,35 @@
                                     <option value="8">+8 bits (65536 samples)</option>
                                 </select>
                             </div>
+                            <div class="config-field" id="cfgVoltAcRateField">
+                                <label>AC ADC Rate</label>
+                                <select id="cfgVoltAcRate">
+                                    <option value="10000" selected>10 kHz (default, Nyquist 5 kHz)</option>
+                                    <option value="20000">20 kHz (Nyquist 10 kHz)</option>
+                                    <option value="40000">40 kHz (Nyquist 20 kHz)</option>
+                                    <option value="80000">80 kHz (Nyquist 40 kHz)</option>
+                                    <option value="100000">100 kHz (Nyquist 50 kHz)</option>
+                                    <option value="200000">200 kHz (Nyquist 100 kHz)</option>
+                                    <option value="400000">400 kHz (Nyquist 200 kHz)</option>
+                                    <option value="800000">800 kHz (Nyquist 400 kHz)</option>
+                                    <option value="1000000">1 MHz (Nyquist 500 kHz)</option>
+                                    <option value="1500000">1.5 MHz (Nyquist 750 kHz)</option>
+                                    <option value="2000000">2 MHz (Nyquist 1 MHz)</option>
+                                    <option value="2400000">2.4 MHz (Nyquist 1.2 MHz)</option>
+                                </select>
+                            </div>
+                            <div class="config-field" id="cfgVoltAcChunkField">
+                                <label>AC Chunk (samples/packet)</label>
+                                <select id="cfgVoltAcChunk">
+                                    <option value="32">32 samples</option>
+                                    <option value="64" selected>64 samples (default)</option>
+                                    <option value="128">128 samples</option>
+                                    <option value="256">256 samples</option>
+                                    <option value="512">512 samples</option>
+                                </select>
+                            </div>
                             <div class="config-field">
-                                <label>Sample Rate (Hz)</label>
+                                <label>UI Update Rate (Hz)</label>
                                 <input type="number" id="cfgVoltSampleRate" value="8" min="1" max="1000">
                             </div>
                             <div class="config-field">
@@ -594,6 +720,8 @@
                                 <select id="cfgVoltRange">
                                     <option value="±30" data-divider="11.0" data-baseoffset="0.0" data-bias="false"
                                         data-autopolarity="true" selected>±30V Auto-Polarity</option>
+                                    <option value="±30" data-divider="21.0" data-baseoffset="0.0" data-bias="true"
+                                        data-autopolarity="false">±30V Forced Bias (no auto-switch)</option>
                                     <option value="0..3.3" data-divider="1.0" data-baseoffset="0.0" data-bias="false"
                                         data-autopolarity="false">0..3.3V Direct Input (1:1)</option>
                                 </select>
@@ -616,7 +744,7 @@
                     <div class="osc-toolbar card"
                         style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
                         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                            <button class="btn btn-success btn-sm" id="btnOscStartStop" disabled>
+                            <button class="btn btn-success btn-sm" id="btnOscStartStop">
                                 ▶ Start
                             </button>
                             <button class="btn btn-outline btn-sm" id="btnOscAutoScale">
@@ -681,8 +809,24 @@
                                         <span>CH4</span>
                                     </label>
                                 </div>
+                                <div class="text-xs text-muted" id="oscSingleChHint"
+                                    style="display: none; margin-top: 4px;">
+                                    ETS/Aliasing/Undersampling — захват только одного канала
+                                </div>
                             </div>
 
+                            <div class="config-field">
+                                <label>Mode</label>
+                                <select id="cfgOscMode">
+                                    <option value="realtime" selected>Real-time (≤3.8 MHz)</option>
+                                    <option value="ets">ETS (5/10/20 MHz)</option>
+                                    <option value="autohf">Auto HF (alias + undersample)</option>
+                                    <option value="alias">Aliasing (carrier finder, ≤ ~12 MHz)</option>
+                                    <option value="malias">Aliasing manual (zone)</option>
+                                    <option value="usample">Undersample (manual carrier)</option>
+                                </select>
+                                <div class="text-xs text-muted">Alias/Auto HF: sine best — square/PWM folds harmonics</div>
+                            </div>
                             <div class="config-field">
                                 <label>Sample Rate (kHz)</label>
                                 <select id="cfgOscSampleRate">
@@ -701,6 +845,18 @@
                                     <option value="20000">20 MHz (ETS, step 50ns)</option>
                                     <!-- 50/100 MHz removed: step < 1 NOP cycle (12ns) is physically impossible -->
                                 </select>
+                            </div>
+                            <div class="config-field" id="cfgUndersampleFcField" style="display: none;">
+                                <label>Undersample carrier (MHz)</label>
+                                <input type="number" id="cfgUndersampleFc" value="10" step="0.1" min="0.05" max="40"
+                                    style="width: 100px; font-family: 'JetBrains Mono', monospace;">
+                                <div class="text-xs text-muted">Standalone Undersample: expected carrier, 0.05…40 MHz (&gt;12 MHz: ADC track &amp; hold rolls off — weak signal)</div>
+                            </div>
+                            <div class="config-field" id="cfgAliasZoneField" style="display: none;">
+                                <label>Alias fold zone</label>
+                                <input type="number" id="cfgAliasZone" value="0" step="1" min="0" max="128"
+                                    style="width: 100px; font-family: 'JetBrains Mono', monospace;">
+                                <div class="text-xs text-muted">Manual Aliasing: Nyquist zone of the band (0 = baseband)</div>
                             </div>
                             <div class="config-field">
                                 <label>ADC Resolution</label>
@@ -723,6 +879,8 @@
                                 <select id="cfgOscVoltRange">
                                     <option value="±30" data-divider="21.0" data-baseoffset="0.0" data-bias="true"
                                         data-autopolarity="true" selected>±30V Auto-Polarity</option>
+                                    <option value="±30" data-divider="21.0" data-baseoffset="0.0" data-bias="true"
+                                        data-autopolarity="false">±30V Forced Bias (no auto-switch)</option>
                                     <option value="0..3.3" data-divider="1.0" data-baseoffset="0.0" data-bias="false"
                                         data-autopolarity="false">0..3.3V Direct Input (1:1)</option>
                                 </select>
@@ -798,13 +956,13 @@
                     <div class="card"
                         style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button class="btn btn-success btn-sm" id="btnCompTest" disabled>
+                            <button class="btn btn-success btn-sm" id="btnCompTest">
                                 Test Component
                             </button>
                             <button class="btn btn-outline btn-sm" id="btnCompStop">
                                 Cancel
                             </button>
-                            <button class="btn btn-outline btn-sm" id="btnSmallCap" disabled
+                            <button class="btn btn-outline btn-sm" id="btnSmallCap"
                                 title="Ultra-Small Capacitors (1-80pF)">
                                 pF Mode
                             </button>
@@ -973,6 +1131,229 @@
                             style="max-height: 220px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.5; color: #cbd5e1; background: rgba(0, 0, 0, 0.45); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05); user-select: text;">
                             <div style="color: #64748b; font-style: italic;">Debug log initialized. Ready for test
                                 events...</div>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <!-- ======================== SDR RECEIVER ======================== -->
+                <div class="tab-panel" id="panel-sdr">
+
+                    <!-- Toolbar -->
+                    <div class="card"
+                        style="display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 12px 20px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <button class="btn btn-success btn-sm" id="btnSdrStart">▶ Start SDR</button>
+                            <button class="btn btn-danger btn-sm" id="btnSdrStop" disabled>■ Stop</button>
+                            <div class="config-field" style="margin: 0;">
+                                <label style="font-size: 10px;">Band</label>
+                                <select id="cfgSdrBand">
+                                    <option value="0" selected>— preset —</option>
+                                    <option value="0.9">MW (0.9 MHz)</option>
+                                    <option value="3.57">80 m (3.57 MHz)</option>
+                                    <option value="7.1">40 m (7.10 MHz)</option>
+                                    <option value="10.118">30 m (10.118 MHz CW)</option>
+                                    <option value="14.2">20 m (14.20 MHz)</option>
+                                    <option value="18.1">17 m (18.10 MHz)</option>
+                                    <option value="21.2">15 m (21.20 MHz)</option>
+                                    <option value="28.4">10 m (28.40 MHz)</option>
+                                    <option value="30.0">30 MHz top</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <span class="text-sm text-muted">Listen:</span>
+                            <input type="number" id="sdrListenMHz" step="0.0001" min="0.0005" max="30"
+                                style="width: 110px; font-size: 13px;" title="Listening frequency, MHz" />
+                            <span class="text-sm text-muted">MHz</span>
+                        </div>
+                    </div>
+
+                    <!-- Spectrum + Waterfall -->
+                    <div class="card" style="padding: 14px 16px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div class="config-title" style="margin-bottom: 0;">RF Spectrum (alias-folded, span =
+                                <span id="sdrSpanLbl">500</span> kHz)
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <span class="text-xs text-muted">Waterfall gain (dB)</span>
+                                <input type="range" id="sdrWfGain" min="-40" max="30" value="0" step="1"
+                                    style="width: 120px;" />
+                            </div>
+                        </div>
+                        <div class="sdr-canvas-wrap">
+                            <canvas id="sdrSpectrum"></canvas>
+                            <div style="position: relative;">
+                                <canvas id="sdrWf"></canvas>
+                                <canvas id="sdrWfOverlay"
+                                    style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;">
+                                </canvas>
+                            </div>
+                        </div>
+                        <div class="sdr-hint" style="margin-top: 8px;">
+                            Click the spectrum or waterfall to tune. <b>Mouse wheel</b> = tune ±10 kHz (0–30
+                            MHz) · <b>Shift + wheel</b> = waterfall gain. The waterfall is a fixed alias
+                            lens: <i>all RF of the same fold parity maps onto the same columns</i>, so a
+                            stripe can be a "ghost" of a different band — verify by ear; the audio always
+                            follows the exact <b>T</b> frequency shown in the ruler corner. In the
+                            mixer's <b>Aligned</b> LO mode the picture stays clean everywhere: the LO
+                            sits on the fs/2 grid so its harmonics alias onto the screen edges, windows
+                            repeat every h·fs (h = 1/3/5, deeper ones hear weaker), and the MIR windows
+                            simply show the odd-fold content like alias zones. Where the grid offers
+                            nothing better than a deep harmonic (h = 5: conversion −14 dB, e.g.
+                            4.51–5.49 MHz @ fs 1000k) or has no window at all (16–17, 22–23 MHz),
+                            the receiver falls back to the plain ladder window at full strength —
+                            the status marks those slots <b>FB</b> and the harmonic comb returns there
+                            only; try a different fs for a cleaner aligned cover.
+                        </div>
+                    </div>
+
+                    <!-- Demod card -->
+                    <div class="card">
+                        <div class="config-title">Demodulator (low-IF + Hilbert analytic signal)</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start;">
+
+                            <div class="config-field" style="min-width: 130px;">
+                                <label>Mode</label>
+                                <select id="cfgSdrMode">
+                                    <option value="usb" selected>USB</option>
+                                    <option value="lsb">LSB</option>
+                                    <option value="cw">CW</option>
+                                    <option value="am">AM</option>
+                                    <option value="fm">FM</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 130px;">
+                                <label>Filter (total BW)</label>
+                                <select id="cfgSdrBw">
+                                    <option value="500">500 Hz</option>
+                                    <option value="1800">1.8 kHz</option>
+                                    <option value="2400">2.4 kHz</option>
+                                    <option value="2800" selected>2.8 kHz</option>
+                                    <option value="3600">3.6 kHz</option>
+                                    <option value="6000">6 kHz (AM)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 150px;">
+                                <label>Antenna input (ADC pin)</label>
+                                <select id="cfgSdrPin">
+                                    <option value="0" selected>PA1 (TP/CH1)</option>
+                                    <option value="1">PA2</option>
+                                    <option value="2">PA3</option>
+                                    <option value="3">PA4</option>
+                                    <option value="4">PA5</option>
+                                    <option value="5">PA6</option>
+                                    <option value="6">PA7</option>
+                                    <option value="7">PB0</option>
+                                    <option value="8">PB1</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 190px;"
+                                title="External Polyakov mixer (2 antiparallel Schottky diodes, 2nd-harmonic conversion): IF = RF − 2·LO. LO is the device's own PWM square: f_LO = (f − 8 kHz)/2, so LO ≤ 15 MHz covers the whole 3–30 MHz.">
+                                <label>Mixer (Polyakov, 2nd harm.)</label>
+                                <select id="sdrMixMode">
+                                    <option value="0" selected>Off (direct ADC)</option>
+                                    <option value="1">On — LO = PWM gen</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" id="sdrMixLoField" style="min-width: 170px; display: none;"
+                                title="PWM output driving the mixer LO (100–200 Ω series into the mixer). Must not be the same pin as the antenna input; TIM2 pins (PA0/PB3) are excluded — the SDR capture timer lives on TIM2.">
+                                <label>MIX LO pin · <span id="sdrMixerLo" style="color: #4ade80;"></span></label>
+                                <select id="sdrMixLoPin">
+                                    <option value="0">PA8 (TIM1_CH1)</option>
+                                    <option value="1">PA9 (TIM1_CH2)</option>
+                                    <option value="2" selected>PA10 (TIM1_CH3)</option>
+                                    <option value="3">PB0 (TIM3_CH3)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" id="sdrMixModeField" style="min-width: 150px; display: none;"
+                                title="Auto: the LO follows the tuned frequency (window = 2*LO .. 2*LO + span). Aligned: the LO is locked to the fs/2 grid (j*500 kHz @ fs 1000k), so every LO harmonic aliases onto the screen edges instead of dumping a comb into the band; windows repeat every h*fs (h = commutation harmonic, deeper ones hear weaker); mirrored MIR windows are part of the same grid; slots with only deep harmonics fall back to the plain ladder (FB in the status). Manual: you set the LO yourself; GAP in the status means the channel fell outside that window.">
+                                <label>LO mode</label>
+                                <select id="sdrMixLoMode">
+                                    <option value="auto" selected>Auto — follow tune</option>
+                                    <option value="aligned">Aligned — fs/2 grid</option>
+                                    <option value="manual">Manual</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" id="sdrMixHField" style="min-width: 130px; display: none;"
+                                title="Aligned mode only: max commutation harmonic for the RX window. h=1 mixes at full strength, h=3 loses 9.5 dB, h=5 loses 14 dB — deeper harmonics add coverage but hear weaker.">
+                                <label>Max harmonic</label>
+                                <select id="sdrMixHMax">
+                                    <option value="1">1 · 0 dB</option>
+                                    <option value="3">3 · −9.5 dB</option>
+                                    <option value="5" selected>5 · −14 dB</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" id="sdrMixManualField" style="min-width: 120px; display: none;"
+                                title="LO in MHz, quantized to the nearest PWM ladder node (84 MHz / integer). Applies on Enter/blur; starts the new LO at once when the SDR runs. GAP = channel outside the window.">
+                                <label>Manual LO (MHz)</label>
+                                <input id="sdrMixLoMhz" type="number" min="0.002" max="42" step="0.001"
+                                    placeholder="auto" style="width: 100%;">
+                            </div>
+
+                            <div class="config-field" style="min-width: 110px;">
+                                <label>Sample rate (fs)</label>
+                                <select id="cfgSdrFs">
+                                    <option value="1500">1500 kHz (750 kW span)</option>
+                                    <option value="1000" selected>1000 kHz (500 kW span)</option>
+                                    <option value="800">800 kHz (400 kW)</option>
+                                    <option value="500">500 kHz (250 kW)</option>
+                                    <option value="250">250 kHz (125 kW)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 120px;" title="12-bit: +24 dB dynamic range (cleaner weak-signal audio), halved capture depth. Applied on Start.">
+                                <label>ADC bits</label>
+                                <select id="cfgSdrBits">
+                                    <option value="8" selected>8 bit (fast)</option>
+                                    <option value="12">12 bit (clean)</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 110px;">
+                                <label>Waterfall FPS</label>
+                                <select id="cfgSdrFps">
+                                    <option value="5">5</option>
+                                    <option value="10" selected>10</option>
+                                    <option value="15">15</option>
+                                    <option value="20">20</option>
+                                    <option value="25">25</option>
+                                    <option value="30">30</option>
+                                </select>
+                            </div>
+
+                            <div class="config-field" style="min-width: 150px;">
+                                <label>Volume</label>
+                                <input type="range" id="sdrVolume" min="0" max="1.5" step="0.05" value="0.7"
+                                    style="width: 100%;" />
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: 10px; min-width: 220px;">
+                                <span class="text-xs text-muted" style="white-space: nowrap;">S-meter</span>
+                                <div class="sdr-meter-track">
+                                    <div class="sdr-meter-fill" id="sdrSMeterBar"></div>
+                                </div>
+                                <span class="text-xs text-mono" id="sdrSMeterDb"
+                                    style="color: #4ade80; min-width: 36px;">-</span>
+                            </div>
+                        </div>
+
+                        <div class="status-bar" style="margin-top: 14px;">
+                            <div class="status-flag">
+                                <span class="text-muted" id="sdrStatus">Stop</span>
+                            </div>
+                        </div>
+
+                        <div class="sdr-hint" style="margin-top: 12px;">
+                            <b>EXPERIMENTAL</b>
                         </div>
                     </div>
                 </div>
@@ -1311,6 +1692,10 @@
                     <!-- Parameters Output Row -->
                     <div class="volt-info-row">
                         <div class="volt-info-item">
+                            <div class="volt-info-label">Real Output (timer)</div>
+                            <div class="volt-info-value text-mono" id="lblSigRealFreq">1.00 kHz</div>
+                        </div>
+                        <div class="volt-info-item">
                             <div class="volt-info-label">Period (T)</div>
                             <div class="volt-info-value text-mono" id="lblSigPeriod">1.00 ms</div>
                         </div>
@@ -1516,6 +1901,300 @@
                         </div>
                     </div>
                 </div><!-- /panel-pwmdac -->
+
+                <div class="tab-panel" id="panel-modulator">
+                    <!-- Toolbar Card -->
+                    <div class="card"
+                        style="display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-success btn-sm" id="btnModStart" disabled>
+                                ▶ Start Modulation
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="btnModStop" disabled>
+                                ■ Stop
+                            </button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="status-badge stopped" id="lblModStatus">STOPPED</span>
+                            <span class="text-xs text-muted">
+                                AM/FM/SSB → ΣΔ @ PB5 · Class-D → hardware PWM pin
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Waveform Live Preview Canvas Card -->
+                    <div class="card" style="padding: 16px; position: relative;">
+                        <div class="config-title" style="margin-bottom: 8px;">Modulated Signal Preview</div>
+                        <div
+                            style="width: 100%; border-radius: var(--radius-sm); overflow: hidden; background: #0f172a;">
+                            <canvas id="modWaveCanvas" style="width: 100%; height: 160px; display: block;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Controls & Parameters Grid -->
+                    <div class="card">
+                        <div class="config-title">Modulator Configuration</div>
+
+                        <div class="config-grid"
+                            style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px;">
+                            <!-- Column 1: Mode, Source, Tone & Bitrate -->
+                            <div style="display: flex; flex-direction: column; gap: 10px; flex: 1.2; min-width: 260px;">
+                                <div class="config-field">
+                                    <label>Modulation</label>
+                                    <select id="cfgModMode">
+                                        <option value="1" selected>AM (Double Sideband)</option>
+                                        <option value="2">FM (Frequency)</option>
+                                        <option value="3">SSB (Hilbert USB/LSB)</option>
+                                        <option value="4">Class-D (PWM Duty)</option>
+                                    </select>
+                                    <div class="text-xs text-muted" id="modModeHint">
+                                        AM: s = (1 + m·env)·sin(2π·Fc·t). Carrier is generated live on the ΣΔ bitstream.
+                                    </div>
+                                </div>
+                                <div class="config-field" id="modSidebandField" style="display: none;">
+                                    <label>Sideband (SSB)</label>
+                                    <select id="cfgModSideband">
+                                        <option value="0" selected>USB — Upper</option>
+                                        <option value="1">LSB — Lower</option>
+                                    </select>
+                                    <div class="text-xs text-muted">Source band ~300 Hz…8 kHz (15-tap Hilbert FIR @ 32 kS/s). Use STD bitrate for SSB.</div>
+                                </div>
+                                <div class="config-field">
+                                    <label>Modulating Source</label>
+                                    <select id="cfgModSource">
+                                        <option value="0" selected>Internal tone (freq below)</option>
+                                        <option value="1">External signal via ADC</option>
+                                    </select>
+                                </div>
+                                <div class="config-field" id="modToneField">
+                                    <label>Tone Frequency (internal)</label>
+                                    <input type="number" id="cfgModToneFreq" value="1000" min="10" max="8000">
+                                </div>
+                                <!-- Quick Tone Presets -->
+                                <div
+                                    style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 2px;">
+                                    <span class="text-xs text-muted"
+                                        style="margin-right: 2px; font-weight: 600;">Tone:</span>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="60"
+                                        style="padding: 2px 6px; font-size: 11px;">60 Hz</button>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="440"
+                                        style="padding: 2px 6px; font-size: 11px;">440 Hz</button>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="1000"
+                                        style="padding: 2px 6px; font-size: 11px;">1 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="2000"
+                                        style="padding: 2px 6px; font-size: 11px;">2 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="4000"
+                                        style="padding: 2px 6px; font-size: 11px;">4 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-tone-preset-btn" data-freq="8000"
+                                        style="padding: 2px 6px; font-size: 11px;">8 kHz</button>
+                                </div>
+                                <div class="config-field" id="modBitrateField">
+                                    <label>Bitstream bitrate</label>
+                                    <select id="cfgModHq">
+                                        <option value="5">HQ — 1.31 Mbps (heavier CPU, best for AM/FM)</option>
+                                        <option value="6" selected>STD — 656 kbps (recommended)</option>
+                                    </select>
+                                    <div class="text-xs text-muted">Oversampling = bitrate / 32 kS/s. Add an RC filter after PB5 (e.g. 10 kΩ + 10 nF).</div>
+                                </div>
+                            </div>
+
+                            <!-- Column 2: Large Carrier Knob -->
+                            <div class="config-field"
+                                style="display: flex; flex-direction: column; align-items: center;">
+                                <label id="lblModCarrierTitle">Carrier</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="knob-container" id="carrierKnob"
+                                        style="width: 160px; height: 160px; margin-right: 0;">
+                                        <svg viewBox="0 0 100 100" class="knob-svg">
+                                            <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b"
+                                                stroke-width="12" />
+                                            <circle id="carrierKnobFill" cx="50" cy="50" r="40" fill="none"
+                                                stroke="#38bdf8" stroke-width="12" stroke-linecap="round"
+                                                stroke-dasharray="251.33" stroke-dashoffset="251.33"
+                                                transform="rotate(-90 50 50)"
+                                                style="filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));" />
+                                            <circle id="carrierKnobThumb" cx="50" cy="10" r="8" fill="#ffffff" />
+                                        </svg>
+                                        <div class="knob-value" id="carrierKnobText" style="font-size: 22px;">
+                                            1.00<br><span style="font-size:12px; color: #94a3b8">kHz</span></div>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                                        <input type="number" id="cfgModCarrier" value="1000" min="20" max="20000"
+                                            style="width: 95px; font-size: 13px;"
+                                            title="Enter exact carrier frequency">
+                                        <input type="range" id="cfgModCarrierRange" min="0" max="3" step="0.001"
+                                            value="0" style="display: none;">
+                                    </div>
+                                </div>
+                                <!-- Quick Carrier Presets -->
+                                <div id="modCarrierPresetsSigma"
+                                    style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+                                    <span class="text-xs text-muted"
+                                        style="margin-right: 2px; font-weight: 600;">F_c:</span>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="100"
+                                        style="padding: 2px 6px; font-size: 11px;">100 Hz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="1000"
+                                        style="padding: 2px 6px; font-size: 11px;">1 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="5000"
+                                        style="padding: 2px 6px; font-size: 11px;">5 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="10000"
+                                        style="padding: 2px 6px; font-size: 11px;">10 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="20000"
+                                        style="padding: 2px 6px; font-size: 11px;">20 kHz</button>
+                                </div>
+                                <!-- Quick Carrier Presets (Class-D) -->
+                                <div id="modCarrierPresetsClassD"
+                                    style="display: none; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+                                    <span class="text-xs text-muted"
+                                        style="margin-right: 2px; font-weight: 600;">F_pwm:</span>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="5000"
+                                        style="padding: 2px 6px; font-size: 11px;">5 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="62500"
+                                        style="padding: 2px 6px; font-size: 11px;">62.5 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="100000"
+                                        style="padding: 2px 6px; font-size: 11px;">100 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="200000"
+                                        style="padding: 2px 6px; font-size: 11px;">200 kHz</button>
+                                    <button class="btn btn-outline btn-sm mod-carrier-preset-btn" data-freq="300000"
+                                        style="padding: 2px 6px; font-size: 11px;">300 kHz</button>
+                                </div>
+                            </div>
+
+                            <!-- Column 3: Large Depth Knob -->
+                            <div class="config-field"
+                                style="display: flex; flex-direction: column; align-items: center;">
+                                <label id="lblModDepthTitle">Depth (%)</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="knob-container" id="depthKnob"
+                                        style="width: 160px; height: 160px; margin-right: 0;">
+                                        <svg viewBox="0 0 100 100" class="knob-svg">
+                                            <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b"
+                                                stroke-width="12" />
+                                            <circle id="depthKnobFill" cx="50" cy="50" r="40" fill="none"
+                                                stroke="#38bdf8" stroke-width="12" stroke-linecap="round"
+                                                stroke-dasharray="251.33" stroke-dashoffset="0"
+                                                transform="rotate(-90 50 50)"
+                                                style="filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));" />
+                                            <circle id="depthKnobThumb" cx="50" cy="10" r="8" fill="#ffffff" />
+                                        </svg>
+                                        <div class="knob-value" id="depthKnobText" style="font-size: 22px;">
+                                            100<br><span style="font-size:12px; color: #94a3b8">%</span></div>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                                        <input type="number" id="cfgModDepth" value="100" min="0" max="100"
+                                            style="width: 65px; font-size: 13px;"
+                                            title="Scroll mouse wheel to change depth">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Column 4: mode-dependent parameters -->
+                            <div style="display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 240px;">
+                                <div class="config-field" id="modFmDevField" style="display: none;">
+                                    <label>FM deviation</label>
+                                    <input type="number" id="cfgModDev" value="2000" min="0" max="15000">
+                                    <div class="text-xs text-muted">Peak deviation 0…15 kHz (keep carrier + deviation ≤ 20 kHz).</div>
+                                </div>
+                                <div class="config-field" id="modSsbLevelField" style="display: none;">
+                                    <label>SSB level</label>
+                                    <input type="range" id="cfgModSsbLevel" min="0" max="100" value="70">
+                                    <div class="text-xs text-muted" id="lblModSsbLevelVal">70 %</div>
+                                </div>
+                                <div class="config-field" id="modOutPinField" style="display: none;">
+                                    <label>PWM Output Pin (Class-D)</label>
+                                    <select id="cfgModOutPin">
+                                        <option value="0" selected>PA8 (TIM1_CH1)</option>
+                                        <option value="1">PA9 (TIM1_CH2)</option>
+                                        <option value="2">PA10 (TIM1_CH3)</option>
+                                        <option value="3">PB0 (TIM3_CH3)</option>
+                                        <option value="4">PB1 (TIM3_CH4)</option>
+                                        <option value="5">PB6 (TIM4_CH1)</option>
+                                        <option value="6">PB7 (TIM4_CH2)</option>
+                                        <option value="7">PB8 (TIM4_CH3)</option>
+                                        <option value="10">PB9 (TIM4_CH4)</option>
+                                    </select>
+                                </div>
+                                <div class="config-field">
+                                    <label style="display: inline-flex; gap: 8px; align-items: center;">
+                                        <input type="checkbox" id="cfgModNorm" checked> Auto-fit (AGC to target peak)
+                                    </label>
+                                    <label>Target peak</label>
+                                    <input type="range" id="cfgModNormTarget" min="5" max="100" value="80">
+                                    <div class="text-xs text-muted" id="lblModTargetVal">80 % of full swing</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- External ADC Source Conditioning Card -->
+                    <div class="card" id="modAdcCard">
+                        <div class="config-title">External Source Conditioning (ADC)</div>
+                        <div id="modAdcSection" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px;">
+                            <div style="display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 240px;">
+                                <div class="config-field">
+                                    <label>ADC Source channel</label>
+                                    <select id="cfgModAdcPin">
+                                        <option value="0" selected>CH1 (PA1)</option>
+                                        <option value="1">CH2 (PA2)</option>
+                                        <option value="2">CH3 (PA3)</option>
+                                        <option value="3">CH4 (PA4)</option>
+                                    </select>
+                                    <label style="margin-top: 6px; display: inline-flex; gap: 8px; align-items: center;">
+                                        <input type="checkbox" id="cfgModBias"> Bias mid-rail (0-V centered input)
+                                    </label>
+                                    <div class="text-xs text-muted">ADC runs on-device at 32 kS/s — no USB round-trip.</div>
+                                </div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 240px;">
+                                <div class="config-field">
+                                    <label>Gain (amplify)</label>
+                                    <input type="range" id="cfgModGain" min="25" max="800" value="200">
+                                    <div class="text-xs text-muted" id="lblModGainVal">2.00 x</div>
+                                </div>
+                                <div class="config-field">
+                                    <label>DC offset (fit)</label>
+                                    <input type="range" id="cfgModOffset" min="-100" max="100" value="0">
+                                    <div class="text-xs text-muted" id="lblModOffsetVal">0 %</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameters Output Row -->
+                    <div class="volt-info-row">
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL1">Carrier</div>
+                            <div class="volt-info-value text-mono" id="lblModP1">1.00 kHz</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL2">Carrier Period</div>
+                            <div class="volt-info-value text-mono" id="lblModP2">1.00 ms</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL3">Oversampling</div>
+                            <div class="volt-info-value text-mono" id="lblModP3">656 bits</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL4">Envelope Rate</div>
+                            <div class="volt-info-value text-mono" id="lblModP4">32 kS/s</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL5">Depth</div>
+                            <div class="volt-info-value text-mono" id="lblModP5">100 %</div>
+                        </div>
+                        <div class="volt-info-item">
+                            <div class="volt-info-label" id="lblModL6">Phase Increment</div>
+                            <div class="volt-info-value text-mono" id="lblModP6">134217728</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="text-xs text-muted">
+                            May run together with the oscilloscope (tone source only). While the external ADC source is active, other
+                            modes (osc/voltmeter) are temporarily released. Stop the modulator before using the sigma-delta DAC tab.
+                        </div>
+                    </div>
+                </div><!-- /panel-modulator -->
 
                 <!-- ======================== CALIBRATION ======================== -->
                 <div class="tab-panel" id="panel-calibration">
@@ -1752,7 +2431,7 @@
                         </div>
 
                         <div style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-                            MicroTester Release v1.4
+                            MicroTester Release v1.5
                         </div>
 
                         <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">
@@ -1798,6 +2477,17 @@
                                 <input type="number" id="cfgCompFreq" min="1" max="1000000" step="1" value="120"
                                     style="width: 140px; font-size: 13px;"
                                     title="Frequency in Hz used on the PC to calculate capacitive reactance Xc = 1/(2*pi*f*C) and inductive reactance XL = 2*pi*f*L">
+                            </div>
+                            <div class="config-field" style="text-align: left;">
+                                <label>Resistor Color Bands Rounding</label>
+                                <select id="cfgResistorBandRounding" style="width: 140px; font-size: 13px;"
+                                    title="Snap measured resistance to a standard E-series value ONLY for the resistor color-band picture (measured value display is unchanged)">
+                                    <option value="off">Off (exact measured)</option>
+                                    <option value="E12" selected>E12</option>
+                                    <option value="E24">E24</option>
+                                    <option value="E48">E48</option>
+                                    <option value="E96">E96</option>
+                                </select>
                             </div>
                             <div class="config-field" style="text-align: left;">
                                 <label>Show Debug Logs (Component Tester &amp; Frequency Response)</label>
@@ -2045,16 +2735,18 @@
     <script src="js/app.js?v=2"></script>
     <script src="js/usb_protocol.js"></script>
     <script src="js/calibration.js"></script>
-    <script src="js/voltmeter.js?v=3"></script>
-    <script src="js/oscilloscope.js?v=3"></script>
-    <script src="js/pwm_generator.js"></script>
-    <script src="js/signal_generator.js?v=2"></script>
-    <script src="js/comp_tester.js?v=17"></script>
+    <script src="js/voltmeter.js?v=4"></script>
+    <script src="js/oscilloscope.js?v=5"></script>
+    <script src="js/pwm_generator.js?v=5"></script>
+    <script src="js/signal_generator.js?v=3"></script>
+    <script src="js/comp_tester.js?v=18"></script>
     <script src="js/logger.js?v=2"></script>
-    <script src="js/freqresp.js?v=59"></script>
+    <script src="js/freqresp.js?v=61"></script>
+    <script src="js/sdr.js?v=24"></script>
+    <script src="js/modulator.js?v=4"></script>
 
     <script>
-        if ('serviceWorker' in navigator) {
+        if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js')
                     .then((reg) => console.log('[PWA] Service Worker registered successfully:', reg.scope))

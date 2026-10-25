@@ -34,12 +34,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isRunning = false;
 
-    // --- Enable/Disable Buttons based on USB Connection ---
-    setInterval(() => {
-        const connected = !!(microTester && microTester.device);
-        if (btnPwmDacStart) btnPwmDacStart.disabled = !connected || isRunning;
-        if (btnPwmDacStop) btnPwmDacStop.disabled = !connected || !isRunning;
-    }, 500);
+    // --- Enable/Disable Buttons based on Running state ---
+    // Start stays clickable while disconnected: clicking it opens the WebUSB
+    // device picker (same UX as the oscilloscope / voltmeter tabs).
+    const syncRunButtons = () => {
+        if (btnPwmDacStart) btnPwmDacStart.disabled = isRunning;
+        if (btnPwmDacStop) btnPwmDacStop.disabled = !isRunning;
+    };
+    syncRunButtons();
+    setInterval(syncRunButtons, 500);
 
     // --- Helper: Format Time Units ---
     function formatTime(seconds) {
@@ -559,8 +562,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Start / Stop Handlers ---
     if (btnPwmDacStart) {
-        btnPwmDacStart.addEventListener('click', () => {
-            if (!microTester || !microTester.device) return alert("Connect USB first!");
+        btnPwmDacStart.addEventListener('click', async () => {
+            if (!microTester || !microTester.device) {
+                if (!microTester) return alert("Connect USB first!");
+                // Same UX as the oscilloscope: clicking Start opens the device picker
+                const ok = await microTester.connect();
+                if (!ok || !microTester.device) return alert("Connect USB first!");
+            }
 
             isRunning = true;
 
